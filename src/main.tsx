@@ -14,7 +14,14 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Tutor = lazy(() => import("./pages/Tutor.tsx"));
+const Materials = lazy(() => import("./pages/Materials.tsx"));
+const Assignments = lazy(() => import("./pages/Assignments.tsx"));
+const Notes = lazy(() => import("./pages/Notes.tsx"));
+const Quizzes = lazy(() => import("./pages/Quizzes.tsx"));
 const Progress = lazy(() => import("./pages/Progress.tsx"));
+const Rewards = lazy(() => import("./pages/Rewards.tsx"));
+const Groups = lazy(() => import("./pages/Groups.tsx"));
+const Settings = lazy(() => import("./pages/Settings.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -143,10 +150,66 @@ createRoot(document.getElementById("root")!).render(
                 }
               />
               <Route
+                path="/materials"
+                element={
+                  <RequireAuth>
+                    <Materials />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/assignments"
+                element={
+                  <RequireAuth>
+                    <Assignments />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/notes"
+                element={
+                  <RequireAuth>
+                    <Notes />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/quizzes"
+                element={
+                  <RequireAuth>
+                    <Quizzes />
+                  </RequireAuth>
+                }
+              />
+              <Route
                 path="/progress"
                 element={
                   <RequireAuth>
                     <Progress />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/rewards"
+                element={
+                  <RequireAuth>
+                    <Rewards />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/groups"
+                element={
+                  <RequireAuth>
+                    <Groups />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <RequireAuth>
+                    <Settings />
                   </RequireAuth>
                 }
               />

@@ -40,22 +40,21 @@ import { Zorbi } from "@/components/Zorbi";
 
 export interface NavItem {
   label: string;
-  href?: string;
+  href: string;
   icon: ComponentType<{ className?: string }>;
-  soon?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "AI Tutor", href: "/tutor", icon: Sparkles },
-  { label: "My Materials", icon: FolderOpen, soon: true },
-  { label: "Assignments", icon: ClipboardList, soon: true },
-  { label: "Notes", icon: NotebookPen, soon: true },
-  { label: "Quizzes", icon: ListChecks, soon: true },
+  { label: "My Materials", href: "/materials", icon: FolderOpen },
+  { label: "Assignments", href: "/assignments", icon: ClipboardList },
+  { label: "Notes", href: "/notes", icon: NotebookPen },
+  { label: "Quizzes", href: "/quizzes", icon: ListChecks },
   { label: "Progress", href: "/progress", icon: TrendingUp },
-  { label: "Rewards", icon: Gift, soon: true },
-  { label: "Study Groups", icon: Users, soon: true },
-  { label: "Settings", icon: Settings, soon: true },
+  { label: "Rewards", href: "/rewards", icon: Gift },
+  { label: "Study Groups", href: "/groups", icon: Users },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 function SidebarNav({
@@ -68,14 +67,8 @@ function SidebarNav({
   const navigate = useNavigate();
 
   const handleClick = (item: NavItem) => {
-    if (item.soon) {
-      toast(`${item.label} is on the Zorbi roadmap — coming in v2.`);
-      return;
-    }
-    if (item.href) {
-      navigate(item.href);
-      onNavigate?.();
-    }
+    navigate(item.href);
+    onNavigate?.();
   };
 
   return (
@@ -106,11 +99,6 @@ function SidebarNav({
               <Icon className="size-4" />
             </span>
             <span className="flex-1">{item.label}</span>
-            {item.soon && (
-              <span className="rounded-full bg-lavender-100 px-2 py-0.5 text-[10px] font-semibold text-lavender-600">
-                v2
-              </span>
-            )}
             {active && (
               <span className="size-1.5 rounded-full bg-brand-500 shadow-[0_0_8px_rgba(80,110,255,0.8)]" />
             )}
@@ -292,10 +280,8 @@ export function AppShell({
   title: string;
   subtitle?: string;
 }) {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isDashboard = pathname === "/dashboard";
 
   const upgrade = () =>
     toast("Premium is on its way", {
@@ -352,16 +338,14 @@ export function AppShell({
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2.5 md:ml-0">
-              {isDashboard && (
-                <Button
-                  type="button"
-                  onClick={upgrade}
-                  className="hidden cursor-pointer rounded-full bg-gradient-to-r from-sun-400 to-coral-400 font-semibold text-white shadow-[0_8px_20px_-8px_rgba(240,150,60,0.7)] hover:from-sun-300 hover:to-coral-300 sm:inline-flex"
-                >
-                  <Zap className="size-4" />
-                  Upgrade to Pro
-                </Button>
-              )}
+              <Button
+                type="button"
+                onClick={upgrade}
+                className="hidden cursor-pointer rounded-full bg-gradient-to-r from-sun-400 to-coral-400 font-semibold text-white shadow-[0_8px_20px_-8px_rgba(240,150,60,0.7)] hover:from-sun-300 hover:to-coral-300 sm:inline-flex"
+              >
+                <Zap className="size-4" />
+                Upgrade to Pro
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"

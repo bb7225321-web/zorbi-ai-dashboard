@@ -14,6 +14,7 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
+import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -32,6 +33,13 @@ const WEEK = [
   { day: "Fri", minutes: 55 },
   { day: "Sat", minutes: 80 },
   { day: "Sun", minutes: 60 },
+];
+
+const MONTH = [
+  { day: "Week 1", minutes: 320 },
+  { day: "Week 2", minutes: 410 },
+  { day: "Week 3", minutes: 285 },
+  { day: "Week 4", minutes: 375 },
 ];
 
 const SUBJECTS = [
@@ -106,24 +114,29 @@ function Card({
   title,
   icon: Icon,
   tint,
+  action,
   children,
   className,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   tint: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <section className={cn("glass rounded-3xl p-6", className)}>
-      <header className="flex items-center gap-2.5">
-        <span className={cn("flex size-8 items-center justify-center rounded-lg", tint)}>
-          <Icon className="size-4" />
-        </span>
-        <h2 className="text-[15px] font-bold tracking-tight text-slate-900">
-          {title}
-        </h2>
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className={cn("flex size-8 items-center justify-center rounded-lg", tint)}>
+            <Icon className="size-4" />
+          </span>
+          <h2 className="text-[15px] font-bold tracking-tight text-slate-900">
+            {title}
+          </h2>
+        </div>
+        {action}
       </header>
       <div className="mt-5">{children}</div>
     </section>
@@ -131,7 +144,9 @@ function Card({
 }
 
 export default function Progress() {
-  const totalMinutes = WEEK.reduce((sum, d) => sum + d.minutes, 0);
+  const [range, setRange] = useState<"week" | "month">("week");
+  const data = range === "week" ? WEEK : MONTH;
+  const totalMinutes = data.reduce((sum, d) => sum + d.minutes, 0);
 
   return (
     <AppShell
@@ -169,14 +184,33 @@ export default function Progress() {
           </Card>
 
           <Card
-            title="Weekly Activity"
+            title="Study Activity"
             icon={TrendingUp}
             tint="bg-lavender-100 text-lavender-500"
             className="xl:col-span-2"
+            action={
+              <div className="flex rounded-full border border-white/80 bg-white/70 p-1 shadow-sm">
+                {(["week", "month"] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRange(r)}
+                    className={cn(
+                      "cursor-pointer rounded-full px-3.5 py-1 text-[11px] font-semibold capitalize transition-all",
+                      range === r
+                        ? "bg-gradient-to-r from-brand-500 to-lavender-500 text-white shadow-[0_6px_14px_-6px_rgba(90,110,255,0.6)]"
+                        : "text-slate-500 hover:text-slate-800",
+                    )}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            }
           >
             <div className="h-[210px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={WEEK} barCategoryGap="28%">
+                <BarChart data={data} barCategoryGap={range === "week" ? "28%" : "38%"}>
                   <defs>
                     <linearGradient id="weekly-grad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#6E8CFF" />
