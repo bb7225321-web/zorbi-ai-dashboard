@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import {
-  Crosshair, LayoutDashboard, ShoppingCart, PackagePlus, Boxes, BarChart3, Users as UsersIcon,
+  LayoutDashboard, ShoppingCart, PackagePlus, Boxes, BarChart3, Users as UsersIcon,
   Truck, Wallet, FileBarChart2, UserCog, Settings as SettingsIcon, Search, LogOut,
-  KeyRound, Clock, ShieldCheck,
+  KeyRound, Clock, ShieldCheck, ArrowUp, ArrowDown, CornerDownLeft, PackageSearch,
 } from "lucide-react";
 import { PosProvider, usePos } from "./store";
 import { PrintPortal } from "./print";
-import { Modal, Btn, Field, Inp, Tag } from "./ui";
-import { ROLE_LABEL, Role, Screen, fmtDate, todayISO, nowHM } from "./core";
+import { Modal, Btn, Field, Inp, Tag, Empty } from "./ui";
+import { ROLE_LABEL, Screen, Perm, fmtDate, todayISO, nowHM, fmtNum, stockOf } from "./core";
+import { ZBLogoLockup, ZBMark, AboutModal } from "./logo";
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { Pos } from "./pages/Pos";
@@ -21,22 +22,22 @@ import { Reports } from "./pages/Reports";
 import { Users } from "./pages/Users";
 import { Settings } from "./pages/Settings";
 
-const NAV: { id: Screen; label: string; icon: React.ReactNode; roles: Role[]; kbd?: string }[] = [
-  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="size-[18px]" />, roles: ["admin", "manager", "cashier"] },
-  { id: "pos", label: "Point of Sale", icon: <ShoppingCart className="size-[18px]" />, roles: ["admin", "manager", "cashier"], kbd: "F1" },
-  { id: "purchases", label: "Purchases", icon: <PackagePlus className="size-[18px]" />, roles: ["admin", "manager"], kbd: "F6" },
-  { id: "products", label: "Products", icon: <Boxes className="size-[18px]" />, roles: ["admin", "manager"] },
-  { id: "inventory", label: "Inventory", icon: <BarChart3 className="size-[18px]" />, roles: ["admin", "manager"] },
-  { id: "customers", label: "Customers", icon: <UsersIcon className="size-[18px]" />, roles: ["admin", "manager", "cashier"] },
-  { id: "suppliers", label: "Suppliers", icon: <Truck className="size-[18px]" />, roles: ["admin", "manager"] },
-  { id: "accounts", label: "Accounts", icon: <Wallet className="size-[18px]" />, roles: ["admin", "manager"] },
-  { id: "reports", label: "Reports", icon: <FileBarChart2 className="size-[18px]" />, roles: ["admin", "manager"] },
-  { id: "users", label: "Users", icon: <UserCog className="size-[18px]" />, roles: ["admin"] },
-  { id: "settings", label: "Settings", icon: <SettingsIcon className="size-[18px]" />, roles: ["admin"] },
+const NAV: { id: Screen; label: string; icon: React.ReactNode; perm: Perm; kbd?: string }[] = [
+  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="size-[18px]" />, perm: "receipts" },
+  { id: "pos", label: "Point of Sale", icon: <ShoppingCart className="size-[18px]" />, perm: "pos", kbd: "F1" },
+  { id: "purchases", label: "Purchases", icon: <PackagePlus className="size-[18px]" />, perm: "purchases", kbd: "F6" },
+  { id: "products", label: "Products", icon: <Boxes className="size-[18px]" />, perm: "products" },
+  { id: "inventory", label: "Inventory", icon: <BarChart3 className="size-[18px]" />, perm: "inventory", kbd: "F7" },
+  { id: "customers", label: "Customers", icon: <UsersIcon className="size-[18px]" />, perm: "customers", kbd: "F4" },
+  { id: "suppliers", label: "Suppliers", icon: <Truck className="size-[18px]" />, perm: "suppliers" },
+  { id: "accounts", label: "Accounts", icon: <Wallet className="size-[18px]" />, perm: "accounts" },
+  { id: "reports", label: "Reports", icon: <FileBarChart2 className="size-[18px]" />, perm: "reports" },
+  { id: "users", label: "Users", icon: <UserCog className="size-[18px]" />, perm: "users" },
+  { id: "settings", label: "Settings", icon: <SettingsIcon className="size-[18px]" />, perm: "settings", kbd: "F12" },
 ];
 
-function canAccess(screen: Screen, role: Role): boolean {
-  return NAV.find((n) => n.id === screen)?.roles.includes(role) ?? false;
+function screenPerm(s: Screen): Perm {
+  return NAV.find((n) => n.id === s)?.perm || "receipts";
 }
 
 export function PosApp() {
@@ -49,50 +50,51 @@ export function PosApp() {
 }
 
 function Shell() {
-  const { user, screen, navTo, logout, confirmState, confirm } = usePos();
+  const { user, screen, navTo } = usePos();
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  // F5 — refresh the current screen
+  useEffect(() => {
+    const h = () => setTick((t) => t + 1);
+    window.addEventListener("zb:refresh", h);
+    return () => window.removeEventListener("zb:refresh", h);
+  }, []);
 
   if (!user) return <Login />;
   if (user.mustChange) return <ForcePassword />;
-  if (!canAccess(screen, user.role)) {
-    // route to first accessible screen
-    const first = NAV.find((n) => n.roles.includes(user.role))?.id || "dashboard";
-    setTimeout(() => navTo(first), 0);
-  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
-      <Sidebar />
+      <Sidebar onAbout={() => setAboutOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar />
+        <Topbar onAbout={() => setAboutOpen(true)} />
         <main className="flex-1 overflow-y-auto">
-          <ScreenView />
+          <ScreenView tick={tick} />
         </main>
       </div>
-      <GlobalSearch />
+      <GlobalShortcuts />
+      <SearchModal />
       <ConfirmModal />
+      <AdminGateModal />
       <PrintPortal />
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }
 
-function Sidebar() {
+function Sidebar({ onAbout }: { onAbout: () => void }) {
   const { db, user, screen, navTo, logout } = usePos();
-  const nav = NAV.filter((n) => n.roles.includes(user?.role || "cashier"));
+  const nav = NAV.filter((n) => (user?.perms || []).includes(n.perm) || user?.role === "admin");
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:flex">
-      <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-md shadow-indigo-600/30">
-          <Crosshair className="size-5 text-white" />
-        </div>
-        <div>
-          <div className="text-sm font-bold leading-tight tracking-tight text-slate-900 dark:text-white">MY PHARMACY</div>
-          <div className="text-[10px] font-semibold uppercase tracking-widest text-indigo-500">POS System</div>
-        </div>
+      <div className="flex items-center gap-3 px-4 py-4">
+        <ZBLogoLockup size={38} onClick={onAbout} />
       </div>
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {nav.map((n) => (
           <button key={n.id} type="button" onClick={() => navTo(n.id)}
-            className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+            className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all active:scale-[0.98] ${
               screen === n.id
                 ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/25"
                 : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -106,11 +108,11 @@ function Sidebar() {
       <div className="border-t border-slate-100 p-3 dark:border-slate-800">
         <div className="rounded-2xl bg-gradient-to-br from-slate-50 to-indigo-50/60 p-3 dark:from-slate-800 dark:to-slate-900">
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-            <ShieldCheck className="size-4 text-indigo-500" />
+            <ShieldCheck className="size-4 text-emerald-500" />
             {user?.name} · {ROLE_LABEL[user?.role || "cashier"]}
           </div>
           <div className="mt-2 text-[10px] leading-relaxed text-slate-400">
-            {db.demo ? "DEMO database — data resets via Settings → Database." : `Data stored locally · ${db.products.length} products`}
+            {db.products.length} products · {db.batches.length} batches · stored on this computer
           </div>
           <button type="button" onClick={logout} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900">
             <LogOut className="size-3.5" /> Logout
@@ -121,7 +123,7 @@ function Sidebar() {
   );
 }
 
-function Topbar() {
+function Topbar({ onAbout }: { onAbout: () => void }) {
   const { db, user, navTo } = usePos();
   const [clock, setClock] = useState(nowHM());
   useEffect(() => {
@@ -131,25 +133,24 @@ function Topbar() {
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 border-b border-slate-200 bg-white/80 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
       <div className="lg:hidden">
-        <div className="flex items-center gap-2">
-          <Crosshair className="size-5 text-indigo-600" />
-          <span className="text-sm font-bold">MY PHARMACY POS</span>
-        </div>
+        <button type="button" onClick={onAbout} className="flex items-center gap-2">
+          <ZBMark size={30} />
+          <span className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">ZB <span className="text-sky-500">SOFTWARE</span></span>
+        </button>
       </div>
-      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("pos-search"))}
-        className="flex h-10 flex-1 max-w-md items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-400 transition hover:border-indigo-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-700">
+      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("pos-search", { detail: { mode: "all" } }))}
+        className="flex h-10 w-full max-w-md items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-400 transition hover:border-indigo-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-700">
         <Search className="size-4 text-indigo-500" />
         <span className="flex-1 text-left">Search products, customers, receipts…</span>
         <span className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-400 dark:border-slate-600 dark:bg-slate-700">Ctrl+F</span>
       </button>
       <div className="ml-auto flex items-center gap-3">
         <div className="hidden items-center gap-2 rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400 sm:flex">
-          <Clock className="size-4 text-indigo-500" />
+          <Clock className="size-4 text-emerald-500" />
           {fmtDate(todayISO())} · {clock}
         </div>
-        {db.demo && <Tag tone="amber">DEMO</Tag>}
         <div className="hidden items-center gap-2 md:flex">
-          <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white">
+          <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-600 to-emerald-600 text-sm font-bold text-white">
             {(user?.name || "U").slice(0, 1).toUpperCase()}
           </div>
           <div className="leading-tight">
@@ -162,98 +163,198 @@ function Topbar() {
   );
 }
 
-function ScreenView() {
+function ScreenView({ tick }: { tick: number }) {
   const { screen, user } = usePos();
-  const s: Screen = canAccess(screen, user?.role || "cashier") ? screen : "dashboard";
+  const perm = screenPerm(screen);
+  const allowed = user?.role === "admin" || (user?.perms || []).includes(perm);
+  const s: Screen = allowed ? screen : "dashboard";
+  const key = s + tick;
   switch (s) {
-    case "dashboard": return <Dashboard />;
-    case "pos": return <Pos />;
-    case "purchases": return <Purchases />;
-    case "products": return <Products />;
-    case "inventory": return <Inventory />;
-    case "customers": return <Customers />;
-    case "suppliers": return <Suppliers />;
-    case "accounts": return <Accounts />;
-    case "reports": return <Reports />;
-    case "users": return <Users />;
-    case "settings": return <Settings />;
-    default: return <Dashboard />;
+    case "dashboard": return <Dashboard key={key} />;
+    case "pos": return <Pos key={key} />;
+    case "purchases": return <Purchases key={key} />;
+    case "products": return <Products key={key} />;
+    case "inventory": return <Inventory key={key} />;
+    case "customers": return <Customers key={key} />;
+    case "suppliers": return <Suppliers key={key} />;
+    case "accounts": return <Accounts key={key} />;
+    case "reports": return <Reports key={key} />;
+    case "users": return <Users key={key} />;
+    case "settings": return <Settings key={key} />;
+    default: return <Dashboard key={key} />;
   }
 }
 
+// ------------------------------------------------------------------ shortcuts
+function GlobalShortcuts() {
+  const { navTo, user } = usePos();
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      // F-keys work even while typing (barcode scanners / POS entry)
+      const f = e.key;
+      if (f === "F1") { e.preventDefault(); navTo("pos"); }
+      else if (f === "F2") { e.preventDefault(); window.dispatchEvent(new CustomEvent("pos-search", { detail: { mode: "product" } })); }
+      else if (f === "F3") { e.preventDefault(); navTo("pos"); window.dispatchEvent(new CustomEvent("pos:new-sale")); }
+      else if (f === "F4") { e.preventDefault(); window.dispatchEvent(new CustomEvent("pos-search", { detail: { mode: "customer" } })); }
+      else if (f === "F5") { e.preventDefault(); window.dispatchEvent(new CustomEvent("zb:refresh")); }
+      else if (f === "F6") { e.preventDefault(); if (user?.role === "admin" || user?.perms.includes("purchases")) navTo("purchases"); }
+      else if (f === "F7") { e.preventDefault(); if (user?.role === "admin" || user?.perms.includes("inventory")) navTo("inventory"); }
+      else if (f === "F8") { e.preventDefault(); navTo("pos"); window.dispatchEvent(new CustomEvent("pos:receipts")); }
+      else if (f === "F9") { e.preventDefault(); window.dispatchEvent(new CustomEvent("pos:print")); }
+      else if (f === "F10") { e.preventDefault(); window.dispatchEvent(new CustomEvent("pos:payment")); }
+      else if (f === "F11") { e.preventDefault(); toggleFullscreen(); }
+      else if (f === "F12") { e.preventDefault(); if (user?.role === "admin") navTo("settings"); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("pos-search", { detail: { mode: "all" } }));
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [navTo, user]);
+  return null;
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+  else document.documentElement.requestFullscreen().catch(() => toast.error("Fullscreen is not available in this browser."));
+}
+
 // ------------------------------------------------------------------ search
-function GlobalSearch() {
-  const { db, navTo, user } = usePos();
+type SearchMode = "all" | "product" | "customer";
+
+interface SearchHit {
+  type: string;
+  title: string;
+  sub: string;
+  tone: "blue" | "green" | "violet" | "orange";
+  go: () => void;
+}
+
+function SearchModal() {
+  const { db, navTo, user, can } = usePos();
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<SearchMode>("all");
   const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const openFn = () => { setOpen(true); setQ(""); };
-    const key = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") { e.preventDefault(); openFn(); }
+    const openFn = (e: Event) => {
+      const m = (e as CustomEvent).detail?.mode || "all";
+      setMode(m); setQ(""); setSel(0);
+      setOpen(true);
+      setTimeout(() => inputRef.current?.focus(), 30);
     };
     window.addEventListener("pos-search", openFn);
-    window.addEventListener("keydown", key);
-    return () => { window.removeEventListener("pos-search", openFn); window.removeEventListener("keydown", key); };
+    return () => window.removeEventListener("pos-search", openFn);
   }, []);
 
-  const results = useMemo(() => {
+  const results = useMemo<SearchHit[]>(() => {
     const t = q.trim().toLowerCase();
     if (!t) return [];
-    const role = user?.role || "cashier";
-    const out: { type: string; title: string; sub: string; go: () => void }[] = [];
-    if (canAccess("products", role)) {
+    const out: SearchHit[] = [];
+    const wantProducts = mode === "all" || mode === "product";
+    const wantCustomers = mode === "all" || mode === "customer";
+
+    if (wantProducts && (can("pos") || can("products"))) {
       for (const p of db.products) {
-        if (p.name.toLowerCase().includes(t) || p.generic.toLowerCase().includes(t) || p.barcode.includes(t) || p.altBarcode.includes(t) || p.code.toLowerCase().includes(t))
-          out.push({ type: "Product", title: p.name, sub: `${p.code} · ${fmtMoney2(p.retailPrice, db.settings.currency.symbol)}`, go: () => navTo("products", { productId: p.id }) });
+        if (!p.active) continue;
+        if (p.name.toLowerCase().includes(t) || p.generic.toLowerCase().includes(t) || p.barcode.includes(t) ||
+            p.altBarcode.includes(t) || p.code.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t) ||
+            p.brand.toLowerCase().includes(t)) {
+          const st = stockOf(db, p.id);
+          const low = p.minStock > 0 && st < p.minStock;
+          out.push({
+            type: "Product", title: p.name, tone: "blue",
+            sub: `${p.code} · ${db.settings.currency.symbol} ${fmtNum(p.retailPrice)} · Stock ${fmtNum(st)}${low ? " ⚠" : ""}`,
+            go: () => {
+              if (can("pos")) {
+                window.dispatchEvent(new CustomEvent("pos:add-product", { detail: { productId: p.id, qty: 1 } }));
+                navTo("pos");
+              } else navTo("products", { productId: p.id });
+            },
+          });
+        }
       }
     }
-    for (const c of db.customers) {
-      if (c.name.toLowerCase().includes(t) || c.phone.includes(t))
-        out.push({ type: "Customer", title: c.name, sub: c.phone || c.email, go: () => navTo("customers") });
-    }
-    if (canAccess("suppliers", role)) {
-      for (const s of db.suppliers) {
-        if (s.name.toLowerCase().includes(t) || s.phone.includes(t))
-          out.push({ type: "Supplier", title: s.name, sub: s.phone, go: () => navTo("suppliers") });
+    if (wantCustomers && can("customers")) {
+      for (const c of db.customers) {
+        if (c.name.toLowerCase().includes(t) || c.phone.includes(t) || c.cnic.includes(t))
+          out.push({
+            type: "Customer", title: c.name, tone: "green",
+            sub: `${c.phone || "—"} · Balance ${db.settings.currency.symbol} ${fmtNum(c.balance)}`,
+            go: () => {
+              window.dispatchEvent(new CustomEvent("pos:select-customer", { detail: { customerId: c.id } }));
+              if (can("pos")) navTo("pos"); else navTo("customers");
+            },
+          });
       }
     }
-    for (const s of db.sales) {
-      if (s.no.toLowerCase().includes(t) || s.customerName.toLowerCase().includes(t))
-        out.push({ type: "Receipt", title: s.no, sub: `${s.customerName} · ${s.date}`, go: () => navTo("pos", { view: "receipts" }) });
+    if (mode !== "product" && can("receipts")) {
+      for (const s of db.sales) {
+        if (s.status !== "final") continue;
+        if (s.no.toLowerCase().includes(t) || s.customerName.toLowerCase().includes(t) || s.cashierName.toLowerCase().includes(t))
+          out.push({ type: "Receipt", title: s.no, tone: "violet", sub: `${s.customerName} · ${s.date} · ${db.settings.currency.symbol} ${fmtNum(s.net)}`, go: () => navTo("pos", { view: "receipts" }) });
+      }
     }
-    if (canAccess("purchases", role)) {
+    if (mode === "all" && can("purchases")) {
       for (const p of db.purchases) {
+        if (p.status !== "final") continue;
         if (p.no.toLowerCase().includes(t) || p.supplierName.toLowerCase().includes(t))
-          out.push({ type: "Purchase", title: p.no, sub: p.supplierName, go: () => navTo("purchases") });
+          out.push({ type: "Purchase", title: p.no, tone: "orange", sub: `${p.supplierName} · ${p.date}`, go: () => navTo("purchases") });
       }
     }
     return out.slice(0, 12);
-  }, [q, db, navTo, user]);
+  }, [q, db, navTo, user, mode, can]);
+
+  useEffect(() => { setSel(0); }, [q, mode]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => Math.min(results.length - 1, s + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
+    else if (e.key === "Enter") { e.preventDefault(); const r = results[sel]; if (r) { r.go(); setOpen(false); } }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+  };
+
+  const modeTone = { all: "Search everything", product: "Search products — ENTER adds to the POS cart", customer: "Search customers — ENTER selects for the POS" }[mode];
 
   return (
-    <Modal open={open} onClose={() => setOpen(false)} title="Global Search" subtitle="Ctrl+F anywhere — products, customers, suppliers, receipts, purchases." size="md">
-      <Inp autoFocus placeholder="Type to search…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && results[0]) { results[0].go(); setOpen(false); } }} />
+    <Modal open={open} onClose={() => setOpen(false)} title="Search" subtitle={`${modeTone}. Use ↑ ↓ to move, ENTER to select, ESC to close.`} size="lg">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-indigo-500" />
+        <Inp ref={inputRef} className="pl-9" placeholder="Type to search… (F2 = products, F4 = customers, Ctrl+F = everything)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
+      </div>
       <div className="mt-4 max-h-[50vh] space-y-1 overflow-y-auto">
         {results.map((r, i) => (
-          <button key={i} type="button" onClick={() => { r.go(); setOpen(false); }}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-indigo-50 dark:hover:bg-slate-800">
-            <Tag tone={r.type === "Product" ? "violet" : r.type === "Receipt" || r.type === "Purchase" ? "blue" : "green"}>{r.type}</Tag>
+          <button key={r.type + r.title + i} type="button" onMouseEnter={() => setSel(i)} onClick={() => { r.go(); setOpen(false); }}
+            className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+              i === sel
+                ? "border-indigo-500 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/40"
+                : "border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/60"
+            }`}>
+            <Tag tone={r.tone}>{r.type}</Tag>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{r.title}</div>
               <div className="truncate text-xs text-slate-400">{r.sub}</div>
             </div>
+            {i === sel && <CornerDownLeft className="size-4 shrink-0 text-indigo-500" />}
           </button>
         ))}
         {q && !results.length && <p className="py-6 text-center text-sm text-slate-400">No results for “{q}”.</p>}
-        {!q && <p className="py-6 text-center text-sm text-slate-400">Start typing to search across the whole database.</p>}
+        {!q && (
+          <div className="py-4">
+            <Empty message="Start typing — products, customers, receipts and purchases." icon={<PackageSearch className="size-6" />} />
+            <div className="mt-3 flex items-center justify-center gap-4 text-[11px] text-slate-400">
+              <span className="flex items-center gap-1"><ArrowUp className="size-3" /><ArrowDown className="size-3" /> move</span>
+              <span className="flex items-center gap-1"><CornerDownLeft className="size-3" /> select</span>
+              <span className="flex items-center gap-1">ESC close</span>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
-}
-
-function fmtMoney2(n: number, sym: string): string {
-  return `${sym} ${n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // ------------------------------------------------------------------ confirm
@@ -273,6 +374,42 @@ function ConfirmModal() {
   );
 }
 
+// ------------------------------------------------------------------ admin gate
+function AdminGateModal() {
+  const { adminGateState, submitAdminGate } = usePos();
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (adminGateState) {
+      setPw(""); setErr(null);
+      setTimeout(() => ref.current?.focus(), 30);
+    }
+  }, [adminGateState]);
+
+  if (!adminGateState) return null;
+  return (
+    <Modal open onClose={() => adminGateState.resolve(false)} title={adminGateState.title} size="sm"
+      footer={
+        <>
+          <Btn variant="outline" onClick={() => adminGateState.resolve(false)}>Cancel</Btn>
+          <Btn icon={<ShieldCheck className="size-4" />} onClick={() => {
+            const e = submitAdminGate(pw);
+            if (e) setErr(e);
+          }}>Verify &amp; Continue</Btn>
+        </>
+      }>
+      <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">{adminGateState.message}</p>
+      <Field label="Administrator password" required>
+        <Inp ref={ref} type="password" value={pw} onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { const er = submitAdminGate(pw); if (er) setErr(er); } }} placeholder="••••••••" autoFocus />
+      </Field>
+      {err && <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">{err}</div>}
+    </Modal>
+  );
+}
+
 // ------------------------------------------------------------------ force pw
 function ForcePassword() {
   const { changePassword, logout } = usePos();
@@ -282,10 +419,10 @@ function ForcePassword() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6 dark:bg-slate-950">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600">
+          <div className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-emerald-600">
             <KeyRound className="size-5 text-white" />
           </div>
           <div>

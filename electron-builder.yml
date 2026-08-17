@@ -1,6 +1,6 @@
-# MY PHARMACY POS — packaging configuration (electron-builder)
-appId: com.mypharmacy.pos
-productName: My Pharmacy POS
+# ZB SOFTWARE — Pharmacy POS & Inventory System — packaging configuration (electron-builder)
+appId: com.zbsoftware.pharmacypos
+productName: ZB Pharmacy POS
 directories:
   output: release
   buildResources: build
@@ -17,7 +17,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: My Pharmacy POS
-  artifactName: My-Pharmacy-POS-Setup-${version}.${ext}
+  shortcutName: ZB Pharmacy POS
+  artifactName: ZB-Pharmacy-POS-Setup-${version}.${ext}
 portable:
-  artifactName: My-Pharmacy-POS-Portable-${version}.${ext}
+  artifactName: ZB-Pharmacy-POS-Portable-${version}.${ext}

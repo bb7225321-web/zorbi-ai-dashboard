@@ -1,7 +1,7 @@
 // ============================================================================
-// MY PHARMACY POS — shared UI kit
+// ZB SOFTWARE — Pharmacy POS & Inventory System — shared UI kit
 // ============================================================================
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -151,9 +151,11 @@ const inputCls =
   "outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 " +
   "dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500";
 
-export function Inp({ className, ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(inputCls, className)} {...rest} />;
-}
+export const Inp = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  function Inp({ className, ...rest }, ref) {
+    return <input ref={ref} className={cn(inputCls, className)} {...rest} />;
+  },
+);
 export function Txta({ className, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className={cn(inputCls, "min-h-[70px]", className)} {...rest} />;
 }

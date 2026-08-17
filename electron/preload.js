@@ -1,5 +1,5 @@
 // ============================================================================
-// MY PHARMACY POS — preload script (context-isolated)
+// ZB SOFTWARE — Pharmacy POS & Inventory System — preload script (context-isolated)
 // ============================================================================
 const { contextBridge } = require("electron");
 

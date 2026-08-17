@@ -25,7 +25,8 @@ function Parties({ kind }: { kind: "c" | "s" }) {
 
   const list = (isC ? db.customers : db.suppliers).filter((x) => {
     const t = q.toLowerCase();
-    return !t || x.name.toLowerCase().includes(t) || x.phone.toLowerCase().includes(t);
+    return !t || x.name.toLowerCase().includes(t) || x.phone.toLowerCase().includes(t) ||
+      (isC && (x as Customer).cnic.toLowerCase().includes(t));
   });
 
   const openNew = () => { setEditing(null); setFormOpen(true); };
@@ -105,7 +106,7 @@ function PartyForm({ kind, party, onClose, onSave }: {
 }) {
   const isC = kind === "c";
   const [f, setF] = useState<Customer | Supplier>(party ? { ...party } : isC
-    ? { id: "", name: "", phone: "", address: "", email: "", creditLimit: 0, openingBalance: 0, balance: 0, notes: "", createdAt: todayISO() }
+    ? { id: "", name: "", phone: "", cnic: "", address: "", email: "", creditLimit: 0, openingBalance: 0, balance: 0, notes: "", createdAt: todayISO() }
     : { id: "", name: "", contactPerson: "", phone: "", address: "", email: "", openingBalance: 0, balance: 0, notes: "", createdAt: todayISO() });
   const set = (patch: Partial<Customer | Supplier>) => setF({ ...f, ...patch });
   const isNew = !party;
@@ -123,6 +124,7 @@ function PartyForm({ kind, party, onClose, onSave }: {
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={isC ? "Customer Name" : "Supplier Name"} required><Inp value={f.name} onChange={(e) => set({ name: e.target.value })} /></Field>
         <Field label="Phone"><Inp value={f.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+        {isC && <Field label="CNIC (optional)"><Inp value={(f as Customer).cnic} onChange={(e) => set({ cnic: e.target.value })} placeholder="35201-1234567-1" /></Field>}
         {!isC && <Field label="Contact Person"><Inp value={(f as Supplier).contactPerson} onChange={(e) => set({ contactPerson: e.target.value })} /></Field>}
         <Field label="Email"><Inp value={f.email} onChange={(e) => set({ email: e.target.value })} /></Field>
         <Field label="Address" className="sm:col-span-2"><Inp value={f.address} onChange={(e) => set({ address: e.target.value })} /></Field>

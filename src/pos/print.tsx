@@ -1,21 +1,25 @@
 // ============================================================================
-// MY PHARMACY POS — print preview & printing (uses the OS print dialog)
+// ZB SOFTWARE — Pharmacy POS & Inventory System — print preview & printing (uses the OS print dialog)
 // ============================================================================
 import { useState } from "react";
 import { Printer, X, FileDown } from "lucide-react";
 import { usePos, type PrintPayload } from "./store";
-import { PAPER_SIZES, fmtMoney, fmtDate, fmtDT, fmtNum, round2 } from "./core";
+import { PAPER_SIZES, fmtMoney, fmtDate, fmtDT, fmtNum, round2, APP_NAME, APP_SUBTITLE } from "./core";
 import { escapeHtml, labelHTML } from "./barcode";
 import { Btn, IconBtn, Sel, Num } from "./ui";
+import { printLogoHTML } from "./logo";
 
 const esc = escapeHtml;
 
 function docHeader(db: ReturnType<typeof usePos>["db"], opts: { paper: string; copies: number; title: string; subtitle?: string }) {
   const ph = db.settings.pharmacy;
-  const sym = db.settings.currency.symbol;
-  void sym;
+  const showLogo = db.settings.receipt.showLogo;
+  const logo = showLogo ? `<div class="pp-logo">${printLogoHTML(44, ph.name, ph.logo)}</div>` : "";
   return `
   <div class="pp-head">
+    ${logo}
+    <div class="pp-brand">${esc(APP_NAME)}</div>
+    <div class="pp-muted" style="text-transform:uppercase;font-size:0.8em;letter-spacing:1px;">${esc(APP_SUBTITLE)}</div>
     <div class="pp-store">${esc(ph.name)}</div>
     ${ph.address ? `<div>${esc(ph.address)}</div>` : ""}
     ${ph.phone ? `<div>Phone: ${esc(ph.phone)}</div>` : ""}
@@ -33,7 +37,7 @@ function docFooter(db: ReturnType<typeof usePos>["db"]) {
   return `<div class="pp-foot">
     <div class="pp-rule"></div>
     <div>${esc(foot)}</div>
-    <div class="pp-thanks">Thank you for your visit! Get well soon.</div>
+    <div class="pp-thanks">Thank you for shopping with us. Get well soon!</div>
   </div>`;
 }
 
@@ -66,7 +70,7 @@ export function saleHTML(db: ReturnType<typeof usePos>["db"], saleId: string): s
     <table class="pp-totals">
       <tr><td>Gross Total</td><td class="pp-r">${fmtMoney(sale.gross, sym)}</td></tr>
       <tr><td>Item Discount</td><td class="pp-r">${fmtMoney(sale.itemDisc, sym)}</td></tr>
-      <tr><td>Receipt Discount (${fmtNum(sale.receiptDiscPct)}%)</td><td class="pp-r">${fmtMoney(sale.receiptDisc, sym)}</td></tr>
+      <tr><td>Receipt Discount (${sale.receiptDiscType === "amt" ? fmtMoney(sale.receiptDiscValue, sym) : fmtNum(sale.receiptDiscValue) + "%"})</td><td class="pp-r">${fmtMoney(sale.receiptDisc, sym)}</td></tr>
       <tr><td>Sales Tax</td><td class="pp-r">${fmtMoney(sale.tax, sym)}</td></tr>
       <tr><td>Additional Amount</td><td class="pp-r">${fmtMoney(sale.additional, sym)}</td></tr>
       <tr><td>Advance</td><td class="pp-r">${fmtMoney(sale.advance, sym)}</td></tr>
@@ -106,7 +110,7 @@ export function purchaseHTML(db: ReturnType<typeof usePos>["db"], purchaseId: st
     </table>
     <table class="pp-totals">
       <tr><td>Sub Total</td><td class="pp-r">${fmtMoney(p.subTotal, sym)}</td></tr>
-      <tr><td>Discount</td><td class="pp-r">${fmtMoney(p.discount, sym)}</td></tr>
+      <tr><td>Purchase Discount (${p.discountType === "amt" ? fmtMoney(p.discountValue, sym) : fmtNum(p.discountValue) + "%"})</td><td class="pp-r">${fmtMoney(p.discount, sym)}</td></tr>
       <tr><td>Loading Expense</td><td class="pp-r">${fmtMoney(p.loading, sym)}</td></tr>
       <tr><td>Freight Expense</td><td class="pp-r">${fmtMoney(p.freight, sym)}</td></tr>
       <tr><td>Other Expense</td><td class="pp-r">${fmtMoney(p.other, sym)}</td></tr>
@@ -276,7 +280,7 @@ export function PrintPortal() {
         <div id="print-root" className="mx-auto w-fit" dangerouslySetInnerHTML={{ __html: blocks }} />
       </div>
       <p className="border-t border-slate-700/50 bg-slate-900 px-4 py-2 text-[11px] text-slate-400">
-        The preview renders exactly what will be sent to the selected printer. In the browser this uses the OS print dialog (select your thermal/A4 printer there); in the packaged Windows app it prints via the system printer.
+        The preview renders exactly what will be sent to the selected printer. PRINT sends the document to your printer through the system print dialog (choose the thermal or A4 device there); you can also save as PDF.
       </p>
     </div>
   );

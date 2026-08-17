@@ -1,15 +1,22 @@
 import { useState } from "react";
-import { Crosshair, Lock, User as UserIcon, LogIn, XCircle, ShieldCheck } from "lucide-react";
+import { Lock, User as UserIcon, LogIn, XCircle, ShieldCheck, Crosshair } from "lucide-react";
 import { usePos } from "../store";
 import { Btn, Field, Inp } from "../ui";
 import { toast } from "sonner";
+import { ZBMark } from "../logo";
+import { APP_NAME, APP_SUBTITLE, APP_COPYRIGHT } from "../core";
 
 export function Login() {
-  const { login } = usePos();
+  const { login, db } = usePos();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The default administrator password is only shown while it is still the
+  // factory default (mustChange = true). It disappears once changed.
+  const admin = db.users.find((u) => u.role === "admin" && u.active);
+  const showFirstRunHint = !!admin?.mustChange;
 
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -23,27 +30,23 @@ export function Login() {
     }, 250);
   };
 
-  const quick = (u: string, p: string) => {
-    setUsername(u); setPassword(p); setError(null);
-    setTimeout(() => login(u, p), 50);
-  };
-
   return (
-    <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="flex min-h-screen bg-slate-100 dark:bg-slate-950">
       {/* brand panel */}
-      <div className="relative hidden w-[46%] overflow-hidden bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-600 lg:block">
+      <div className="relative hidden w-[46%] overflow-hidden bg-gradient-to-br from-[#0e46c9] via-[#123a9e] to-[#0b7a5a] lg:block">
         <div className="absolute -left-24 -top-24 size-96 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-32 -right-16 size-96 rounded-full bg-violet-400/30 blur-3xl" />
+        <div className="absolute -bottom-32 -right-16 size-96 rounded-full bg-emerald-400/20 blur-3xl" />
         <div className="relative flex h-full flex-col justify-between p-12">
-          <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-              <Crosshair className="size-6 text-white" />
-            </div>
-            <div>
-              <div className="text-lg font-bold tracking-tight text-white">MY PHARMACY POS</div>
-              <div className="text-xs text-indigo-200">Medical Store Management System</div>
-            </div>
-          </div>
+          <button type="button" className="zb-logo flex w-fit items-center gap-3 rounded-xl" onClick={() => toast.info("ZB SOFTWARE — Pharmacy POS & Inventory System")}>
+            <span className="zb-logo-mark relative inline-flex">
+              <ZBMark size={46} />
+              <span className="zb-logo-ripple" aria-hidden />
+            </span>
+            <span className="text-left">
+              <span className="block text-lg font-extrabold tracking-tight text-white">ZB <span className="text-sky-300">SOFTWARE</span></span>
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">{APP_SUBTITLE}</span>
+            </span>
+          </button>
           <div>
             <h1 className="max-w-md text-4xl font-bold leading-tight tracking-tight text-white">
               Complete pharmacy management, offline-first.
@@ -66,7 +69,7 @@ export function Login() {
               ))}
             </div>
           </div>
-          <p className="text-xs text-indigo-200/80">© {new Date().getFullYear()} My Pharmacy POS · Offline desktop edition</p>
+          <p className="text-xs text-indigo-200/80">{APP_COPYRIGHT}</p>
         </div>
       </div>
 
@@ -74,12 +77,12 @@ export function Login() {
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-indigo-600">
-              <Crosshair className="size-6 text-white" />
-            </div>
+            <span className="zb-logo-mark relative inline-flex">
+              <ZBMark size={44} />
+            </span>
             <div>
-              <div className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">MY PHARMACY POS</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Medical Store Management System</div>
+              <div className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">ZB <span className="text-sky-500">SOFTWARE</span></div>
+              <div className="text-xs font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">{APP_SUBTITLE}</div>
             </div>
           </div>
 
@@ -90,13 +93,13 @@ export function Login() {
             <Field label="Username" required>
               <div className="relative">
                 <UserIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                <Inp className="pl-9" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+                <Inp className="pl-9" placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
               </div>
             </Field>
             <Field label="Password" required>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                <Inp className="pl-9" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <Inp className="pl-9" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
               </div>
             </Field>
 
@@ -115,24 +118,21 @@ export function Login() {
             </div>
           </form>
 
-          <div className="mt-8 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/40">
-            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-              <ShieldCheck className="size-4" /> Demo accounts
+          {showFirstRunHint && (
+            <div className="mt-8 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/40">
+              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                <ShieldCheck className="size-4" /> First-time setup
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                Default administrator: <b>admin</b> / <b>admin123</b>. You will be
+                required to change this password on first login — it will never be
+                shown again.
+              </p>
             </div>
-            <div className="mt-3 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
-              {[
-                ["Administrator", "admin", "admin123"],
-                ["Manager", "manager", "manager123"],
-                ["Cashier", "cashier", "cashier123"],
-              ].map(([role, u, pw]) => (
-                <button key={u} type="button" onClick={() => quick(u!, pw!)}
-                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 transition hover:bg-white dark:hover:bg-slate-800">
-                  <span className="font-medium">{role}</span>
-                  <span className="font-mono text-slate-500 dark:text-slate-400">{u} / {pw}</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-slate-400">The first login as <b>admin</b> forces a password change.</p>
+          )}
+
+          <div className="mt-6 flex items-center justify-center gap-2 text-[11px] text-slate-400">
+            <Crosshair className="size-3" /> {APP_NAME} · Data stays on this computer
           </div>
         </div>
       </div>

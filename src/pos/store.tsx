@@ -1,5 +1,5 @@
 // ============================================================================
-// MY PHARMACY POS — state store: auth, CRUD, stock/ledger/cash business logic
+// ZB SOFTWARE — state store: auth, permissions, CRUD, stock/ledger/cash logic
 // ============================================================================
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
@@ -8,14 +8,15 @@ import {
 import { toast } from "sonner";
 import {
   DB, User, Product, Customer, Supplier, Sale, Purchase, SaleReturn, PurchaseReturn,
-  Settings, Screen, PayMethod, uid, todayISO, nowHM, bumpNo, round2, daysUntil,
+  Settings, Screen, PayMethod, Perm, uid, todayISO, nowHM, bumpNo, round2, daysUntil,
   calcSaleTotals, lineTotal, addLedgerEntry, addCashEntry, audit, stockOf,
   fmtMoney, nextNo, syncCustomerBalance, syncSupplierBalance, download,
+  DiscType, StockOpKind,
 } from "./core";
 import { buildSeed } from "./seed";
 
-const DB_KEY = "my-pharmacy-pos-db-v1";
-const SESSION_KEY = "my-pharmacy-pos-session-v1";
+const DB_KEY = "zb-software-pos-db-v2";
+const SESSION_KEY = "zb-software-pos-session-v2";
 
 export type PrintKind =
   | "sale" | "purchase" | "saleReturn" | "purchaseReturn"
@@ -28,6 +29,7 @@ export interface PrintPayload {
 }
 
 interface ConfirmState { title: string; message: string; danger?: boolean; resolve: (v: boolean) => void; }
+interface AdminGateState { title: string; message: string; resolve: (v: boolean) => void; }
 
 interface PosApi {
   db: DB;
@@ -35,6 +37,9 @@ interface PosApi {
   screen: Screen;
   routeData: unknown;
   navTo: (screen: Screen, data?: unknown) => void;
+
+  can: (perm: Perm) => boolean;
+  isAdmin: () => boolean;
 
   login: (username: string, password: string) => string | null;
   changePassword: (current: string, next: string) => string | null;
@@ -61,7 +66,7 @@ interface PosApi {
   deletePurchaseDraft: (id: string) => void;
   returnPurchase: (purchaseId: string, lines: { productId: string; batchId: string; batchNo: string; qty: number }[], note: string) => string | null;
 
-  adjustStock: (productId: string, batchId: string, delta: number, reason: string) => string | null;
+  adjustStock: (productId: string, batchId: string, delta: number, reason: string, kind?: StockOpKind) => string | null;
   receivePayment: (customerId: string, amount: number, method: string, note: string) => void;
   paySupplier: (supplierId: string, amount: number, method: string, note: string) => void;
   addExpense: (e: { date: string; category: string; description: string; amount: number; method: string; note: string }) => void;
@@ -72,7 +77,7 @@ interface PosApi {
   updateSettings: (s: Settings) => void;
   backup: () => void;
   restore: (file: File) => Promise<string | null>;
-  resetDemo: () => void;
+  clearSampleData: () => void;
 
   print: (p: PrintPayload) => void;
   printState: PrintPayload | null;
@@ -81,6 +86,10 @@ interface PosApi {
   confirmState: ConfirmState | null;
   confirm: (title: string, message: string, danger?: boolean) => Promise<boolean>;
   resolveConfirm: (v: boolean) => void;
+
+  adminGateState: AdminGateState | null;
+  adminGate: (title: string, message: string) => Promise<boolean>;
+  submitAdminGate: (password: string) => string | null;
 
   // convenience lookups
   product: (id: string) => Product | undefined;
@@ -97,7 +106,7 @@ function loadDB(): DB {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DB;
-      if (parsed && parsed.version && Array.isArray(parsed.products)) return parsed;
+      if (parsed && parsed.version >= 2 && Array.isArray(parsed.products)) return parsed;
     }
   } catch {
     /* fall through to fresh seed */
@@ -127,7 +136,9 @@ export function PosProvider({ children }: { children: ReactNode }) {
   const [routeData, setRouteData] = useState<unknown>(null);
   const [printState, setPrintState] = useState<PrintPayload | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [adminGateState, setAdminGateState] = useState<AdminGateState | null>(null);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
+  const gateResolve = useRef<((v: boolean) => void) | null>(null);
 
   useEffect(() => { persist(db); }, [db]);
   useEffect(() => {
@@ -150,6 +161,17 @@ export function PosProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const adminGate = useCallback((title: string, message: string) => {
+    return new Promise<boolean>((resolve) => {
+      gateResolve.current = (v: boolean) => {
+        gateResolve.current = null;
+        setAdminGateState(null);
+        resolve(v);
+      };
+      setAdminGateState({ title, message, resolve: gateResolve.current });
+    });
+  }, []);
+
   const navTo = useCallback((s: Screen, data?: unknown) => {
     setScreen(s);
     setRouteData(data ?? null);
@@ -157,8 +179,12 @@ export function PosProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<PosApi>(() => {
-    const ok = () => user;
-    const err = (m: string) => m;
+    const can = (perm: Perm): boolean => {
+      if (!user) return false;
+      if (user.role === "admin") return true;
+      return user.perms.includes(perm);
+    };
+    const isAdmin = () => user?.role === "admin";
 
     const login = (username: string, password: string): string | null => {
       const u = db.users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
@@ -233,6 +259,8 @@ export function PosProvider({ children }: { children: ReactNode }) {
         c.id = uid();
         c.createdAt = todayISO();
         d.customers.push(c);
+        if (c.openingBalance !== 0)
+          addLedgerEntry(d, "c", c.id, c.name, todayISO(), "OPEN", "opening", c.openingBalance, 0, "Opening balance");
         audit(d, user, "Customer created", c.name);
         commit(d, `Customer "${c.name}" saved`);
       } else {
@@ -262,6 +290,8 @@ export function PosProvider({ children }: { children: ReactNode }) {
         s.id = uid();
         s.createdAt = todayISO();
         d.suppliers.push(s);
+        if (s.openingBalance !== 0)
+          addLedgerEntry(d, "s", s.id, s.name, todayISO(), "OPEN", "opening", 0, s.openingBalance, "Opening balance");
         audit(d, user, "Supplier created", s.name);
         commit(d, `Supplier "${s.name}" saved`);
       } else {
@@ -297,7 +327,12 @@ export function PosProvider({ children }: { children: ReactNode }) {
         commit(d, `User "${u.username}" created`);
       } else {
         const idx = d.users.findIndex((x) => x.id === u.id);
-        if (idx >= 0) d.users[idx] = u;
+        if (idx >= 0) {
+          // keep the password unless a new one was provided
+          const existing = d.users[idx];
+          if (!u.password && existing) u.password = existing.password;
+          d.users[idx] = u;
+        }
         audit(d, user, "User edited", `${u.username} (${u.role})`);
         commit(d, `User "${u.username}" updated`);
       }
@@ -348,6 +383,12 @@ export function PosProvider({ children }: { children: ReactNode }) {
     const saveSale = (draft: Sale, printIt?: boolean): string | null => {
       if (!draft.items.length) return "Add at least one product.";
       if (draft.method === "credit" && !draft.customerId) return "Select a customer for credit sales.";
+      if (!can("pos.rate") && draft.items.some((i) => {
+        const bt = db.batches.find((b) => b.id === i.batchId);
+        return bt && Math.abs(i.rate - (bt.salePrice || db.products.find((p) => p.id === i.productId)?.retailPrice || 0)) > 0.001;
+      })) return "Permission denied: you are not allowed to change sale prices.";
+      if (!can("pos.discount") && (draft.items.some((i) => i.discountValue > 0) || draft.receiptDiscValue > 0))
+        return "Permission denied: you are not allowed to apply discounts.";
       if (draft.method === "credit" && draft.customerId !== "walkin") {
         const c = db.customers.find((x) => x.id === draft.customerId);
         if (c && c.creditLimit > 0 && draft.balance > c.creditLimit - c.balance)
@@ -407,10 +448,11 @@ export function PosProvider({ children }: { children: ReactNode }) {
         const bt = d.batches.find((b) => b.id === ln.batchId);
         if (!bt) return "Batch not found.";
         bt.qty = round2(bt.qty + ln.qty);
+        const disc = lineDiscount2(sit);
         items.push({
           id: uid(), productId: sit.productId, productName: sit.productName, batchId: sit.batchId,
           batchNo: sit.batchNo, expDate: sit.expDate, qty: ln.qty, rate: sit.rate, cost: sit.cost,
-          discount: round2((sit.rate * ln.qty * sit.discountPct) / 100), total: round2(sit.rate * ln.qty),
+          discount: round2(disc * ln.qty), total: round2(sit.rate * ln.qty - disc * ln.qty),
         });
       }
       const total = round2(items.reduce((s, i) => s + i.total, 0));
@@ -545,7 +587,7 @@ export function PosProvider({ children }: { children: ReactNode }) {
     };
 
     // ------------------------------------------------------------- STOCK / MONEY
-    const adjustStock = (productId: string, batchId: string, delta: number, reason: string): string | null => {
+    const adjustStock = (productId: string, batchId: string, delta: number, reason: string, kind: StockOpKind = "adjustment"): string | null => {
       if (delta === 0) return "Enter a non-zero adjustment.";
       const d = clone(db);
       const bt = d.batches.find((b) => b.id === batchId);
@@ -555,7 +597,7 @@ export function PosProvider({ children }: { children: ReactNode }) {
       bt.qty = round2(bt.qty + delta);
       d.adjustments.push({
         id: uid(), date: todayISO(), productId, productName: prod?.name || "", batchId,
-        batchNo: bt.batchNo, delta, reason, userId: user?.id || "", userName: user?.name || "System",
+        batchNo: bt.batchNo, delta, kind, reason, userId: user?.id || "", userName: user?.name || "System",
       });
       audit(d, user, "Stock adjusted", `${prod?.name || productId} batch ${bt.batchNo} ${delta > 0 ? "+" : ""}${delta} (${reason})`);
       commit(d, "Stock adjusted. Audit record created.");
@@ -631,12 +673,12 @@ export function PosProvider({ children }: { children: ReactNode }) {
     };
 
     const backup = () => {
-      const payload = { app: "MY PHARMACY POS", type: "backup", exportedAt: new Date().toISOString(), db };
-      download(`pharmacy-pos-backup-${todayISO()}.json`, JSON.stringify(payload, null, 2), "application/json");
+      const payload = { app: "ZB SOFTWARE — Pharmacy POS", type: "backup", version: 2, exportedAt: new Date().toISOString(), db };
+      download(`zb-software-backup-${todayISO()}.json`, JSON.stringify(payload, null, 2), "application/json");
       const d = clone(db);
       audit(d, user, "Backup", "Database backup exported");
       setDb(d);
-      toast.success("Backup downloaded.");
+      toast.success("Backup completed successfully.");
     };
 
     const restore = async (file: File): Promise<string | null> => {
@@ -648,19 +690,24 @@ export function PosProvider({ children }: { children: ReactNode }) {
       if (!data || !data.version || !Array.isArray(data.products) || !Array.isArray(data.sales))
         return "Invalid backup file (missing database structure).";
       backup(); // automatic backup before restore
-      setDb(clone(data));
       setPrintState(null);
       audit(data, user, "Restore", "Database restored from backup file");
-      setDb(data);
+      setDb(clone(data));
       toast.success("Database restored.");
       return null;
     };
 
-    const resetDemo = () => {
-      const d = buildSeed();
-      audit(d, user, "Demo reset", "Demo data re-seeded");
-      setDb(d);
-      toast.success("Demo data reset.");
+    const clearSampleData = () => {
+      const d = clone(db);
+      d.products = []; d.batches = []; d.sales = []; d.purchases = [];
+      d.saleReturns = []; d.purchaseReturns = [];
+      d.cLedger = []; d.sLedger = []; d.cash = [];
+      d.expenses = []; d.incomes = []; d.adjustments = [];
+      d.counters = {};
+      d.sampleData = false;
+      // keep users, customers, suppliers and settings
+      audit(d, user, "Sample data removed", "Starter dataset cleared (customers, suppliers, users and settings kept)");
+      commit(d, "Starter data removed.");
     };
 
     const print = (p: PrintPayload) => setPrintState(p);
@@ -672,8 +719,21 @@ export function PosProvider({ children }: { children: ReactNode }) {
     const batch = (id: string) => db.batches.find((x) => x.id === id);
     const stock = (productId: string) => stockOf(db, productId);
 
+    const submitAdminGate = (password: string): string | null => {
+      const u = db.users.find((x) => x.id === user?.id);
+      const admin = db.users.find((x) => x.role === "admin" && x.active);
+      const target = u || admin;
+      if (!target || target.password !== password) return "Incorrect administrator password.";
+      const d = clone(db);
+      audit(d, target, "Admin verification", "Administrator password verified for a protected action");
+      setDb(d);
+      gateResolve.current?.(true);
+      return null;
+    };
+
     return {
       db, user, screen, routeData, navTo,
+      can, isAdmin,
       login, changePassword, logout,
       saveProduct, deleteProduct, saveCustomer, deleteCustomer,
       saveSupplier, deleteSupplier, saveUser, deleteUser, resetPassword,
@@ -681,15 +741,22 @@ export function PosProvider({ children }: { children: ReactNode }) {
       savePurchase, holdPurchase, deletePurchaseDraft, returnPurchase,
       adjustStock, receivePayment, paySupplier,
       addExpense, deleteExpense, addIncome, deleteIncome,
-      updateSettings, backup, restore, resetDemo,
+      updateSettings, backup, restore, clearSampleData,
       print, printState, closePrint,
       confirmState, confirm,
       resolveConfirm: (v: boolean) => confirmResolve.current?.(v),
+      adminGateState, adminGate, submitAdminGate,
       product, customer, supplier, batch, stock,
     };
-  }, [db, user, screen, routeData, printState, confirmState, commit, navTo]);
+  }, [db, user, screen, routeData, printState, confirmState, adminGateState, commit, navTo]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
+}
+
+/** Discount per unit for a returned sale line (pct of rate or fixed per unit). */
+function lineDiscount2(i: Sale["items"][number]): number {
+  if (i.discountValue <= 0) return 0;
+  return i.discountType === "pct" ? round2((i.rate * i.discountValue) / 100) : i.discountValue;
 }
 
 export function usePos(): PosApi {

@@ -1,5 +1,5 @@
 // ============================================================================
-// MY PHARMACY POS — Electron main process (Windows desktop packaging)
+// ZB SOFTWARE — Pharmacy POS & Inventory System — Electron main process (Windows desktop packaging)
 // The app itself is a standard Vite + React build; this shell loads it either
 // from the dev server or from the built dist/ folder.
 // ============================================================================

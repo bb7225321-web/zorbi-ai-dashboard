@@ -9,12 +9,12 @@ import { Product, Purchase, fmtMoney, fmtNum, todayISO, addDays, expiryInfo, sto
 import { barcodeDataURL } from "../barcode";
 
 const emptyProduct = (): Product => ({
-  id: "", code: "", barcode: "", altBarcode: "", name: "", generic: "", brand: "",
+  id: "", code: "", sku: "", barcode: "", altBarcode: "", name: "", generic: "", brand: "",
   category: "", subCategory: "", group: "", supplierId: "", type: "Medicine",
-  control: false, seasonal: false, unit: "Tab", purchaseUnit: "Tab", conversion: 1,
+  control: false, seasonal: false, unit: "Tab", purchaseUnit: "Tab", conversion: 1, packSize: "10s",
   avgCost: 0, purchasePrice: 0, retailPrice: 0, wholesalePrice: 0,
-  minStock: 10, optStock: 50, maxStock: 100, taxPct: 0, discountPct: 0,
-  location: "", notes: "", createdAt: todayISO(),
+  minStock: 10, optStock: 50, maxStock: 100, reorderLevel: 10, taxPct: 0, discountPct: 0,
+  location: "", notes: "", active: true, createdAt: todayISO(),
 });
 
 export function Products() {
@@ -44,7 +44,7 @@ export function Products() {
   const rows = db.products.filter((p) => {
     const t = q.toLowerCase();
     const okQ = !t || p.name.toLowerCase().includes(t) || p.generic.toLowerCase().includes(t) ||
-      p.code.toLowerCase().includes(t) || p.barcode.includes(t) || p.altBarcode.includes(t) || p.brand.toLowerCase().includes(t);
+      p.code.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t) || p.barcode.includes(t) || p.altBarcode.includes(t) || p.brand.toLowerCase().includes(t);
     const okC = cat === "all" || p.category === cat;
     const okS = sup === "all" || p.supplierId === sup;
     return okQ && okC && okS;
@@ -215,6 +215,12 @@ function ProductForm({ product, onClose, onSave }: {
         <Field label="Product Code" required>
           <Inp value={f.code} onChange={(e) => set({ code: e.target.value })} placeholder="PDT-1001" />
         </Field>
+        <Field label="SKU">
+          <Inp value={f.sku} onChange={(e) => set({ sku: e.target.value })} placeholder="SKU-1001" />
+        </Field>
+        <Field label="Pack Size">
+          <Inp value={f.packSize} onChange={(e) => set({ packSize: e.target.value })} placeholder="10s" />
+        </Field>
         <Field label="Barcode">
           <div className="flex gap-2">
             <Inp value={f.barcode} onChange={(e) => set({ barcode: e.target.value })} placeholder="Scan or generate" />
@@ -281,6 +287,9 @@ function ProductForm({ product, onClose, onSave }: {
         <Field label="Minimum Stock">
           <Num value={f.minStock} onChange={(e) => set({ minStock: num(e.target.value) })} min={0} />
         </Field>
+        <Field label="Reorder Level">
+          <Num value={f.reorderLevel} onChange={(e) => set({ reorderLevel: num(e.target.value) })} min={0} />
+        </Field>
         <Field label="Optimal Stock">
           <Num value={f.optStock} onChange={(e) => set({ optStock: num(e.target.value) })} min={0} />
         </Field>
@@ -304,6 +313,10 @@ function ProductForm({ product, onClose, onSave }: {
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={f.seasonal} onChange={(e) => set({ seasonal: e.target.checked })} className="size-4 accent-indigo-600" />
             Seasonal Product
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <input type="checkbox" checked={f.active} onChange={(e) => set({ active: e.target.checked })} className="size-4 accent-emerald-600" />
+            Active (saleable)
           </label>
         </div>
         <Field label="Notes" className="sm:col-span-2">
@@ -414,7 +427,7 @@ function AddBatchForm({ product, onClose }: { product: Product; onClose: () => v
                   qty: f.qty, freeQty: 0, cost: f.cost, retail: f.salePrice,
                   discountPct: 0, taxPct: 0, discount: 0, tax: 0, total: f.qty * f.cost,
                 }],
-                subTotal: f.qty * f.cost, discount: 0, loading: 0, freight: 0, other: 0, additional: 0,
+                subTotal: f.qty * f.cost, discountType: "pct", discountValue: 0, discount: 0, loading: 0, freight: 0, other: 0, additional: 0,
                 tax: 0, advanceTax: 0, withTax: 0, total: f.qty * f.cost,
                 status: "final", returned: false, userId: "", userName: "", createdAt: todayISO(),
               };

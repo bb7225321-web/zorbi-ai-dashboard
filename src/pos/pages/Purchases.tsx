@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { usePos } from "../store";
 import { Page, Card, Btn, IconBtn, Modal, Field, Inp, Num, Sel, Tag, Money, Empty, TableX, Seg } from "../ui";
 import {
-  Purchase, PurchaseItem, Product, uid, todayISO, nowHM, addDays, round2, fmtMoney, fmtNum, fmtDT,
+  Purchase, PurchaseItem, Product, DiscType, uid, todayISO, nowHM, addDays, round2, fmtMoney, fmtNum, fmtDT,
   calcPurchaseTotals, lineTotal, nextNo,
 } from "../core";
 
@@ -117,12 +117,13 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
   const [additional, setAdditional] = useState(0);
   const [advanceTax, setAdvanceTax] = useState(0);
   const [withTax, setWithTax] = useState(0);
-  const [discount, setDiscount] = useState(0);
+  const [discType, setDiscType] = useState<DiscType>("pct");
+  const [discValue, setDiscValue] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const supplier = db.suppliers.find((s) => s.id === supplierId);
-  const totals = calcPurchaseTotals(items, loading, freight, other, additional, db.settings.tax.purchaseTaxPct, discount, advanceTax, withTax);
+  const totals = calcPurchaseTotals(items, loading, freight, other, additional, db.settings.tax.purchaseTaxPct, { type: discType, value: discValue }, advanceTax, withTax);
 
   const setItem = (id: string, patch: Partial<PurchaseItem>) =>
     setItems(items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -131,7 +132,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
     id: "", no: nextNo(db, "PUR"), supplierId, supplierName: supplier?.name || "",
     invoiceNo, billNo, billDate, dueDate, date: todayISO(), time: nowHM(), mode, comments,
     items: items.map((i) => ({ ...i, discount: round2((i.cost * i.qty * i.discountPct) / 100), tax: round2((i.cost * i.qty * i.taxPct) / 100), total: round2(i.cost * i.qty + round2((i.cost * i.qty * i.taxPct) / 100) - round2((i.cost * i.qty * i.discountPct) / 100)) })),
-    subTotal: totals.subTotal, discount, loading, freight, other, additional,
+    subTotal: totals.subTotal, discountType: discType, discountValue: discValue, discount: totals.discountAmt, loading, freight, other, additional,
     tax: totals.tax, advanceTax, withTax, total: totals.total,
     status: "final", returned: false, userId: user?.id || "", userName: user?.name || "", createdAt: todayISO(),
   });
@@ -221,7 +222,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
               { key: "free", label: "Free", align: "right", render: (i: PurchaseItem) => <Num className="w-16 py-1 text-xs" value={i.freeQty} min={0} onChange={(e) => setItem(i.id, { freeQty: num(e.target.value) })} /> },
               { key: "cost", label: "Cost", align: "right", render: (i: PurchaseItem) => <Num className="w-20 py-1 text-xs" value={i.cost} min={0} onChange={(e) => setItem(i.id, { cost: num(e.target.value) })} /> },
               { key: "retail", label: "Retail", align: "right", render: (i: PurchaseItem) => <Num className="w-20 py-1 text-xs" value={i.retail} min={0} onChange={(e) => setItem(i.id, { retail: num(e.target.value) })} /> },
-              { key: "total", label: "Total", align: "right", render: (i: PurchaseItem) => <b className="tabular-nums">{fmtMoney(lineTotal(i.cost, i.qty, i.discountPct, i.taxPct).total, sym)}</b> },
+              { key: "total", label: "Total", align: "right", render: (i: PurchaseItem) => <b className="tabular-nums">{fmtMoney(lineTotal(i.cost, i.qty, "pct", i.discountPct, i.taxPct).total, sym)}</b> },
               { key: "act", label: "", align: "right", render: (i: PurchaseItem) => <IconBtn icon={<Trash2 className="size-4" />} label="Remove" tone="danger" onClick={() => setItems(items.filter((x) => x.id !== i.id))} /> },
             ]}
             rows={items}
@@ -242,8 +243,18 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
               <div key={k} className="flex justify-between"><span className="text-slate-500">{k}</span><span className="tabular-nums">{v}</span></div>
             ))}
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">Discount</span>
-              <Num className="w-24 py-1 text-xs" value={discount} min={0} onChange={(e) => setDiscount(num(e.target.value))} />
+              <span className="text-slate-500">Purchase Discount</span>
+              <div className="flex items-center gap-1">
+                <Sel value={discType} onChange={(e) => setDiscType(e.target.value as DiscType)} className="w-16 rounded-lg border border-slate-300 px-1 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
+                  <option value="pct">%</option>
+                  <option value="amt">{sym}</option>
+                </Sel>
+                <Num className="w-24 py-1 text-xs" value={discValue} min={0} onChange={(e) => setDiscValue(num(e.target.value))} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Discount Amount</span>
+              <span className="tabular-nums text-emerald-600">− {fmtMoney(totals.discountAmt, sym)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Loading Expense</span>
@@ -311,7 +322,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
                       setSupplierId(p.supplierId); setInvoiceNo(p.invoiceNo); setBillNo(p.billNo);
                       setBillDate(p.billDate); setDueDate(p.dueDate); setMode(p.mode); setComments(p.comments);
                       setItems(p.items); setLoading(p.loading); setFreight(p.freight); setOther(p.other);
-                      setAdditional(p.additional); setAdvanceTax(p.advanceTax); setWithTax(p.withTax); setDiscount(p.discount);
+                      setAdditional(p.additional); setAdvanceTax(p.advanceTax); setWithTax(p.withTax); setDiscType(p.discountType || "pct"); setDiscValue(p.discountValue || 0);
                       deletePurchaseDraft(p.id); setShowHeld(false);
                     }}>Retrieve</Btn>
                     <IconBtn icon={<Trash2 className="size-4" />} label="Delete" tone="danger" onClick={() => deletePurchaseDraft(p.id)} />

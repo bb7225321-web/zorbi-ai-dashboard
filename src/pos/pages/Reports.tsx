@@ -7,18 +7,22 @@ import {
 } from "../core";
 
 type ReportId =
-  | "sales" | "saleReturns" | "purchases" | "purchaseReturns" | "stock" | "lowStock"
-  | "expiry" | "profit" | "tax" | "cLedger" | "sLedger" | "expenses" | "income" | "cash";
+  | "sales" | "saleReturns" | "salesDiscount" | "purchases" | "purchaseReturns" | "purchaseDiscount"
+  | "stock" | "lowStock" | "expiry" | "profit" | "tax"
+  | "cLedger" | "sLedger" | "customerCredit" | "supplierBalance"
+  | "expenses" | "income" | "cash";
 
 const GROUPS: { group: string; items: { id: ReportId; label: string }[] }[] = [
   { group: "Sales", items: [
     { id: "sales", label: "Sales Report" },
+    { id: "salesDiscount", label: "Sales Discount Report" },
     { id: "saleReturns", label: "Sales Return Report" },
     { id: "profit", label: "Profit Report" },
     { id: "tax", label: "Tax Report" },
   ] },
   { group: "Purchases", items: [
     { id: "purchases", label: "Purchase Report" },
+    { id: "purchaseDiscount", label: "Purchase Discount Report" },
     { id: "purchaseReturns", label: "Purchase Return Report" },
   ] },
   { group: "Stock", items: [
@@ -29,6 +33,8 @@ const GROUPS: { group: string; items: { id: ReportId; label: string }[] }[] = [
   { group: "Ledgers", items: [
     { id: "cLedger", label: "Customer Ledger" },
     { id: "sLedger", label: "Supplier Ledger" },
+    { id: "customerCredit", label: "Customer Credit Report" },
+    { id: "supplierBalance", label: "Supplier Balance Report" },
   ] },
   { group: "Money", items: [
     { id: "expenses", label: "Expense Report" },
@@ -203,6 +209,14 @@ function buildReport(db: DB, id: ReportId, from: string, to: string, group: stri
       const rows = [...map.entries()].map(([k, e]) => [k, n(e.q), m(e.rev), m(e.cost), m(round2(e.rev - e.cost))]);
       return { cols: ["Category", "Qty", "Revenue", "Cost", "Profit"], rows, totals: ["Total", n([...map.values()].reduce((s, e) => s + e.q, 0)), m([...map.values()].reduce((s, e) => s + e.rev, 0)), m([...map.values()].reduce((s, e) => s + e.cost, 0)), m([...map.values()].reduce((s, e) => s + e.rev - e.cost, 0))] };
     }
+    case "salesDiscount": {
+      const sales = db.sales.filter((s) => s.status === "final" && inRange(s.date));
+      const rows = sales.map((s) => [s.no, fmtDate(s.date), s.customerName, s.cashierName, n(s.gross), n(s.itemDisc), n(s.receiptDisc), m(s.itemDisc + s.receiptDisc)]);
+      return {
+        cols: ["Receipt", "Date", "Customer", "Cashier", "Gross", "Item Disc", "Receipt Disc", "Total Discount"], rows,
+        totals: ["Total", "", "", "", m(sales.reduce((s2, x) => s2 + x.gross, 0)), m(sales.reduce((s2, x) => s2 + x.itemDisc, 0)), m(sales.reduce((s2, x) => s2 + x.receiptDisc, 0)), m(sales.reduce((s2, x) => s2 + x.itemDisc + x.receiptDisc, 0))],
+      };
+    }
     case "saleReturns": {
       const rs = db.saleReturns.filter((r) => inRange(r.date));
       const rows = rs.map((r) => [r.no, fmtDate(r.date), r.saleNo, r.customerName, n(r.items.length), m(r.total), r.method]);
@@ -220,6 +234,14 @@ function buildReport(db: DB, id: ReportId, from: string, to: string, group: stri
       for (const p of ps) { const e = map.get(p.supplierName) || { c: 0, total: 0 }; e.c++; e.total += p.total; map.set(p.supplierName, e); }
       const rows = [...map.entries()].map(([k, e]) => [k, n(e.c), m(e.total)]);
       return { cols: ["Supplier", "Invoices", "Total"], rows, totals: ["Total", n(ps.length), m(ps.reduce((s, p) => s + p.total, 0))] };
+    }
+    case "purchaseDiscount": {
+      const ps = db.purchases.filter((p) => p.status === "final" && inRange(p.date));
+      const rows = ps.map((p) => [p.no, fmtDate(p.date), p.supplierName, n(p.subTotal), n(p.discount), m(p.total)]);
+      return {
+        cols: ["Invoice", "Date", "Supplier", "Sub Total", "Purchase Discount", "Net Total"], rows,
+        totals: ["Total", "", "", m(ps.reduce((s, p) => s + p.subTotal, 0)), m(ps.reduce((s, p) => s + p.discount, 0)), m(ps.reduce((s, p) => s + p.total, 0))],
+      };
     }
     case "purchaseReturns": {
       const rs = db.purchaseReturns.filter((r) => inRange(r.date));
@@ -282,6 +304,16 @@ function buildReport(db: DB, id: ReportId, from: string, to: string, group: stri
       const es = db.sLedger.filter((e) => inRange(e.date));
       const rows = es.map((e) => [fmtDate(e.date), e.partyName, e.ref, e.type, e.debit ? m(e.debit) : "", e.credit ? m(e.credit) : "", m(e.balance)]);
       return { cols: ["Date", "Supplier", "Ref", "Type", "Debit", "Credit", "Balance"], rows, totals: ["Total", "", "", "", m(es.reduce((s, e) => s + e.debit, 0)), m(es.reduce((s, e) => s + e.credit, 0)), ""] };
+    }
+    case "customerCredit": {
+      const rows = db.customers
+        .filter((c) => c.id !== "walkin")
+        .map((c) => [c.name, c.phone || "—", m(c.creditLimit), m(c.balance), m(Math.max(0, c.creditLimit - c.balance)), c.balance > c.creditLimit && c.creditLimit > 0 ? "Over limit" : c.balance > 0 ? "Outstanding" : "Clear"]);
+      return { cols: ["Customer", "Phone", "Credit Limit", "Current Balance", "Available", "Status"], rows, totals: ["Total", "", m(db.customers.reduce((s, c) => s + c.creditLimit, 0)), m(db.customers.reduce((s, c) => s + Math.max(0, c.balance), 0)), "", ""] };
+    }
+    case "supplierBalance": {
+      const rows = db.suppliers.map((s) => [s.name, s.contactPerson || "—", s.phone || "—", m(s.balance), s.balance > 0 ? "Payable" : s.balance < 0 ? "Advance" : "Clear"]);
+      return { cols: ["Supplier", "Contact", "Phone", "Current Payable", "Status"], rows, totals: ["Total", "", "", m(db.suppliers.reduce((s, x) => s + Math.max(0, x.balance), 0)), ""] };
     }
     case "expenses": {
       const es = db.expenses.filter((e) => inRange(e.date));

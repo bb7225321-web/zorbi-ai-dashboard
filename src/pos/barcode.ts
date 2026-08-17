@@ -1,5 +1,5 @@
 // ============================================================================
-// MY PHARMACY POS — dependency-free Code39 barcode generator (canvas → dataURL)
+// ZB SOFTWARE — Pharmacy POS & Inventory System — dependency-free Code39 barcode generator (canvas → dataURL)
 // ============================================================================
 
 // Code39: each character is 9 elements (bar, gap, bar, gap ...) with 3 wide.

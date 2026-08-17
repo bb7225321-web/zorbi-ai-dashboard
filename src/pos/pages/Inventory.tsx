@@ -3,7 +3,7 @@ import { Search, Printer, Download, RefreshCcw, History, AlertTriangle, Ban } fr
 import { toast } from "sonner";
 import { usePos } from "../store";
 import { Page, Card, Btn, IconBtn, Modal, Field, Inp, Num, Sel, Tag, Money, TableX, Seg } from "../ui";
-import { fmtMoney, fmtNum, daysUntil, expiryInfo, stockOf, todayISO, toCsv, download, round2 } from "../core";
+import { fmtMoney, fmtNum, daysUntil, expiryInfo, stockOf, todayISO, toCsv, download, round2, StockOpKind, STOCK_OP_LABEL, stockStatus, STOCK_STATUS_LABEL, type StockStatus } from "../core";
 import { Product } from "../core";
 
 type ExpFilter = "all" | "expired" | "expiring" | "near" | "ok";
@@ -16,7 +16,7 @@ export function Inventory() {
   const [sup, setSup] = useState("all");
   const [expF, setExpF] = useState<ExpFilter>("all");
   const [lowOnly, setLowOnly] = useState(false);
-  const [adj, setAdj] = useState<{ batchId: string; delta: string; reason: string } | null>(null);
+  const [adj, setAdj] = useState<{ batchId: string; delta: string; reason: string; kind: StockOpKind } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export function Inventory() {
       .map((b) => {
         const p = db.products.find((x) => x.id === b.productId);
         const info = expiryInfo(b, db.settings.inventory.expiryWarningDays);
-        return { b, p, info };
+        return { b, p, info, status: p ? stockStatus(db, p) : ("in" as StockStatus) };
       })
       .filter(({ b, p, info }) => {
         const t = q.toLowerCase();
@@ -135,6 +135,11 @@ export function Inventory() {
               const tone = info.tone === "red" ? "red" : info.tone === "amber" ? "amber" : info.tone === "yellow" ? "orange" : "green";
               return <div className="flex items-center gap-2"><span className="text-xs">{b.expDate}</span><Tag tone={tone as "red"}>{info.label}</Tag></div>;
             } },
+            { key: "status", label: "Status", render: ({ status }: Row) => (
+              <Tag tone={status === "in" ? "green" : status === "low" ? "amber" : status === "out" ? "slate" : status === "expiring" ? "orange" : "red"}>
+                {STOCK_STATUS_LABEL[status]}
+              </Tag>
+            ) },
             { key: "qty", label: "Qty", align: "right", sort: ({ b }: Row) => b.qty, render: ({ b, p }: Row) => {
               const low = p && p.minStock > 0 && stockOf(db, p.id) < p.minStock;
               return <b className={low ? "text-amber-600" : ""}>{fmtNum(b.qty)}</b>;
@@ -145,7 +150,7 @@ export function Inventory() {
             { key: "sup", label: "Supplier", render: ({ b }: Row) => db.suppliers.find((s) => s.id === b.supplierId)?.name || "—" },
             { key: "rack", label: "Rack", render: ({ p }: Row) => p?.location || "—" },
             { key: "act", label: "", align: "right", render: ({ b }: Row) => (
-              <IconBtn icon={<RefreshCcw className="size-4" />} label="Adjust stock" tone="primary" onClick={() => setAdj({ batchId: b.id, delta: "0", reason: "" })} />
+              <IconBtn icon={<RefreshCcw className="size-4" />} label="Adjust stock" tone="primary" onClick={() => setAdj({ batchId: b.id, delta: "0", reason: "", kind: "adjustment" })} />
             ) },
           ]}
           rows={rows}
@@ -173,17 +178,22 @@ export function Inventory() {
               <Btn variant="warn" icon={<RefreshCcw className="size-4" />} onClick={() => {
                 const b = db.batches.find((x) => x.id === adj.batchId);
                 if (!b) return;
-                const e = adjustStock(b.productId, adj.batchId, num(adj.delta), adj.reason || "Manual adjustment");
+                const e = adjustStock(b.productId, adj.batchId, num(adj.delta), adj.reason || "Manual adjustment", adj.kind);
                 if (e) toast.error(e);
                 setAdj(null);
               }}>Apply</Btn>
             </>
           }>
           <div className="grid grid-cols-2 gap-4">
+            <Field label="Operation Type">
+              <Sel value={adj.kind} onChange={(e) => setAdj({ ...adj, kind: e.target.value as StockOpKind })}>
+                {(Object.keys(STOCK_OP_LABEL) as StockOpKind[]).map((k) => <option key={k} value={k}>{STOCK_OP_LABEL[k]}</option>)}
+              </Sel>
+            </Field>
             <Field label="Delta (+ / −)" required><Num value={adj.delta} onChange={(e) => setAdj({ ...adj, delta: e.target.value })} /></Field>
-            <Field label="Reason" required><Inp value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} placeholder="e.g. Breakage, expiry, count" /></Field>
+            <Field label="Reason" required className="col-span-2"><Inp value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} placeholder="e.g. Breakage, expiry, stock count" /></Field>
           </div>
-          <p className="mt-3 text-xs text-slate-400">An audit record is created for every adjustment.</p>
+          <p className="mt-3 text-xs text-slate-400">An audit record is created for every operation — damaged, expired and supplier returns all appear in the adjustment history.</p>
         </Modal>
       )}
 
@@ -194,6 +204,7 @@ export function Inventory() {
             { key: "prod", label: "Product", render: (a) => a.productName },
             { key: "batch", label: "Batch", render: (a) => <span className="font-mono text-xs">{a.batchNo}</span> },
             { key: "delta", label: "Delta", align: "right", render: (a) => <b className={a.delta < 0 ? "text-rose-600" : "text-emerald-600"}>{a.delta > 0 ? "+" : ""}{fmtNum(a.delta)}</b> },
+            { key: "kind", label: "Type", render: (a) => <Tag tone={a.kind === "damaged" || a.kind === "expired" ? "red" : a.kind === "supplier-return" ? "amber" : "blue"}>{STOCK_OP_LABEL[a.kind]}</Tag> },
             { key: "reason", label: "Reason" },
             { key: "user", label: "User", render: (a) => a.userName },
           ]}
@@ -207,5 +218,5 @@ export function Inventory() {
   );
 }
 
-type Row = { b: ReturnType<typeof usePos>["db"]["batches"][number]; p?: Product; info: ReturnType<typeof expiryInfo> };
+type Row = { b: ReturnType<typeof usePos>["db"]["batches"][number]; p?: Product; info: ReturnType<typeof expiryInfo>; status: StockStatus };
 function num(v: string): number { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }

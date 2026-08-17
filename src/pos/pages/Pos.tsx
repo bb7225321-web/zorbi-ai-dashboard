@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ScanBarcode, Plus, Trash2, Save, Printer, Pause, Undo2, RotateCcw, Search,
   FileSearch, Banknote, CreditCard, ReceiptText, UserRound, X, RefreshCcw, Layers,
+  Minus,
 } from "lucide-react";
 import { usePos } from "../store";
 import {
   Page, Card, Btn, IconBtn, Modal, Field, Inp, Num, Sel, Tag, Money, Empty, TableX, Seg,
 } from "../ui";
 import {
-  Product, Sale, PayMethod, uid, todayISO, nowHM, round2, fmtMoney, fmtNum, fmtDT,
+  Product, Sale, PayMethod, DiscType, uid, todayISO, nowHM, round2, fmtMoney, fmtNum, fmtDT,
   calcSaleTotals, lineTotal, allocateFEFO, availableBatches, expiryInfo,
   findProduct, WALKIN_ID, stockOf, nextNo,
 } from "../core";
@@ -16,18 +17,21 @@ import {
 interface CartLine {
   productId: string; productName: string; generic: string;
   batchId: string; batchNo: string; expDate: string; unit: string;
-  rate: number; qty: number; discountPct: number; taxPct: number; cost: number;
+  rate: number; qty: number; discType: DiscType; discValue: number; taxPct: number; cost: number;
 }
 
 type PosView = "sale" | "receipts";
 
 export function Pos() {
-  const { db, user, navTo, saveSale, holdSale, deleteHold, returnSale, alreadyReturned, print } = usePos();
+  const { db, user, navTo, saveSale, holdSale, deleteHold, returnSale, alreadyReturned, print, can } = usePos();
   const sym = db.settings.currency.symbol;
+  const canRate = can("pos.rate");
+  const canDisc = can("pos.discount");
   const [view, setView] = useState<PosView>("sale");
   const [customerId, setCustomerId] = useState(WALKIN_ID);
   const [lines, setLines] = useState<CartLine[]>([]);
-  const [receiptDiscPct, setReceiptDiscPct] = useState(0);
+  const [rdType, setRdType] = useState<DiscType>("pct");
+  const [rdValue, setRdValue] = useState(0);
   const [additional, setAdditional] = useState(0);
   const [advance, setAdvance] = useState(0);
   const [method, setMethod] = useState<PayMethod>("cash");
@@ -46,14 +50,18 @@ export function Pos() {
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
   const scanRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<(p: Product, qty: number) => void>(() => undefined);
 
   const customer = db.customers.find((c) => c.id === customerId);
   const salesTaxPct = db.settings.tax.salesTaxPct;
 
   // ---------------- totals ----------------
   const totals = useMemo(
-    () => calcSaleTotals(lines.map((l) => ({ rate: l.rate, qty: l.qty, discountPct: l.discountPct, taxPct: l.taxPct, cost: l.cost })), receiptDiscPct, additional, advance, salesTaxPct),
-    [lines, receiptDiscPct, additional, advance, salesTaxPct],
+    () => calcSaleTotals(
+      lines.map((l) => ({ rate: l.rate, qty: l.qty, discountType: l.discType, discountValue: l.discValue, taxPct: l.taxPct, cost: l.cost })),
+      { type: rdType, value: rdValue }, additional, advance, salesTaxPct,
+    ),
+    [lines, rdType, rdValue, additional, advance, salesTaxPct],
   );
   const change = method === "cash" ? Math.max(0, round2(paid - totals.net)) : 0;
   const balance = Math.max(0, round2(totals.net - paid));
@@ -64,11 +72,12 @@ export function Pos() {
     productId: prod.id, productName: prod.name, generic: prod.generic,
     batchId: bt.id, batchNo: bt.batchNo, expDate: bt.expDate, unit: prod.unit,
     rate: bt.salePrice || prod.retailPrice, qty,
-    discountPct: prod.discountPct, taxPct: prod.taxPct || salesTaxPct, cost: bt.cost,
+    discType: "pct", discValue: prod.discountPct, taxPct: prod.taxPct || salesTaxPct, cost: bt.cost,
   });
 
   // ---------------- add / edit cart ----------------
   const addProduct = (product: Product, qty = 1) => {
+    if (!can("pos")) { toastErr("Permission denied: POS access is not enabled for your account."); return; }
     const usable = availableBatches(db, product.id, db.settings.security.allowExpiredSales);
     if (!usable.length) {
       toastErr(`No sellable batch available for ${product.name}.`);
@@ -80,6 +89,7 @@ export function Pos() {
       setPending({ product, qty });
     }
   };
+  addRef.current = addProduct;
 
   const addLine = (product: Product, batchId: string, qty: number, auto = true) => {
     if (auto) {
@@ -96,7 +106,6 @@ export function Pos() {
       setLines(next);
       return;
     }
-    // specific batch
     const bt = db.batches.find((b) => b.id === batchId)!;
     if (bt.qty < qty) { toastErr(`Insufficient stock in batch ${bt.batchNo}.`); return; }
     const existing = lines.find((l) => l.batchId === batchId && l.productId === product.id);
@@ -107,11 +116,27 @@ export function Pos() {
     } else setLines([...lines, line]);
   };
 
-  const setQty = (productId: string, qty: number) => {
-    if (qty <= 0) { setLines(lines.filter((l) => l.productId !== productId)); return; }
+  const bumpQty = (productId: string, delta: number) => {
     const prod = db.products.find((p) => p.id === productId);
     if (!prod) return;
-    // remove all lines for product, re-allocate FEFO
+    const cur = lines.filter((l) => l.productId === productId).reduce((s, l) => s + l.qty, 0);
+    const next = Math.max(0, round2(cur + delta));
+    if (next === 0) { setLines(lines.filter((l) => l.productId !== productId)); return; }
+    const remaining = lines.filter((l) => l.productId !== productId);
+    const alloc = allocateFEFO(db, productId, next, db.settings.security.allowExpiredSales);
+    if (typeof alloc === "string") { toastErr(alloc); return; }
+    const out = [...remaining];
+    for (const a of alloc) {
+      const bt = db.batches.find((b) => b.id === a.batchId)!;
+      out.push(makeLine(prod, bt, a.qty));
+    }
+    setLines(out);
+  };
+
+  const setQty = (productId: string, qty: number) => {
+    const prod = db.products.find((p) => p.id === productId);
+    if (!prod) return;
+    if (qty <= 0) { setLines(lines.filter((l) => l.productId !== productId)); return; }
     const remaining = lines.filter((l) => l.productId !== productId);
     const alloc = allocateFEFO(db, productId, qty, db.settings.security.allowExpiredSales);
     if (typeof alloc === "string") { toastErr(alloc); return; }
@@ -137,7 +162,7 @@ export function Pos() {
     setLines(lines.filter((l) => !(l.batchId === batchId && l.productId === productId)));
 
   const clearCart = () => {
-    setLines([]); setReceiptDiscPct(0); setAdditional(0); setAdvance(0); setPaid(0);
+    setLines([]); setRdType("pct"); setRdValue(0); setAdditional(0); setAdvance(0); setPaid(0);
     setMethod("cash"); setNotes(""); setErrMsg(null);
   };
 
@@ -170,15 +195,53 @@ export function Pos() {
     return () => window.removeEventListener("keydown", h);
   }, [lines, db]);
 
+  // ---------------- global POS events (F9/F10/F3/F8 + search modal) ----------------
+  useEffect(() => {
+    const onAdd = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const prod = db.products.find((p) => p.id === d.productId);
+      if (prod) addRef.current(prod, Number(d.qty) || 1);
+    };
+    const onCustomer = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      if (d.customerId) setCustomerId(d.customerId);
+    };
+    const onNewSale = () => { clearCart(); setView("sale"); };
+    const onReceipts = () => setView("receipts");
+    const onPrint = () => {
+      if (lines.length) doSave(true);
+      else if (lastSaleNo) {
+        const s = db.sales.find((x) => x.no === lastSaleNo);
+        if (s) print({ kind: "sale", data: s.id });
+        else toastErr("No sale saved in this session yet.");
+      } else toastErr("Add products to the cart first, then print the receipt.");
+    };
+    const onPayment = () => { if (lines.length) setShowPay(true); else toastErr("Add products to the cart first."); };
+    window.addEventListener("pos:add-product", onAdd);
+    window.addEventListener("pos:select-customer", onCustomer);
+    window.addEventListener("pos:new-sale", onNewSale);
+    window.addEventListener("pos:receipts", onReceipts);
+    window.addEventListener("pos:print", onPrint);
+    window.addEventListener("pos:payment", onPayment);
+    return () => {
+      window.removeEventListener("pos:add-product", onAdd);
+      window.removeEventListener("pos:select-customer", onCustomer);
+      window.removeEventListener("pos:new-sale", onNewSale);
+      window.removeEventListener("pos:receipts", onReceipts);
+      window.removeEventListener("pos:print", onPrint);
+      window.removeEventListener("pos:payment", onPayment);
+    };
+  });
+
   // ---------------- save / hold ----------------
   const buildDraft = (): Sale | string => {
     if (!lines.length) return "Add at least one product to the sale.";
     const items = lines.map((l) => {
-      const lt = lineTotal(l.rate, l.qty, l.discountPct, l.taxPct);
+      const lt = lineTotal(l.rate, l.qty, l.discType, l.discValue, l.taxPct);
       return {
         id: uid(), productId: l.productId, productName: l.productName, generic: l.generic,
         batchId: l.batchId, batchNo: l.batchNo, expDate: l.expDate, unit: l.unit,
-        rate: l.rate, qty: l.qty, discountPct: l.discountPct, taxPct: l.taxPct,
+        rate: l.rate, qty: l.qty, discountType: l.discType, discountValue: l.discValue, taxPct: l.taxPct,
         discount: lt.discount, tax: lt.tax, total: lt.total, cost: l.cost,
       };
     });
@@ -186,7 +249,8 @@ export function Pos() {
       id: "", no: nextNo(db, "SALE"), date: todayISO(), time: nowHM(),
       customerId, customerName: customer?.name || "Walk-in Customer", customerPhone: customer?.phone || "",
       cashierId: user?.id || "", cashierName: user?.name || "",
-      items, gross: totals.gross, itemDisc: totals.itemDisc, receiptDiscPct, receiptDisc: totals.receiptDisc,
+      items, gross: totals.gross, itemDisc: totals.itemDisc,
+      receiptDiscType: rdType, receiptDiscValue: rdValue, receiptDisc: totals.receiptDisc,
       tax: totals.tax, additional, advance, net: totals.net,
       method, paid: method === "credit" ? 0 : paid, change: method === "credit" ? 0 : change,
       balance: method === "credit" ? totals.net : balance,
@@ -220,25 +284,20 @@ export function Pos() {
 
   const holds = db.sales.filter((s) => s.status === "hold").sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
 
-  // ---------------- keyboard shortcuts ----------------
+  // ---------------- page shortcuts (non-conflicting with global F-keys) ----------------
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
-      if (e.key === "F1") { e.preventDefault(); clearCart(); setView("sale"); }
-      else if (e.key === "F2") { e.preventDefault(); scanRef.current?.focus(); setShowSearch(false); }
-      else if (e.key === "F4") { e.preventDefault(); doHold(); }
-      else if (e.key === "F5") { e.preventDefault(); setShowHolds(true); }
-      else if (e.key === "F7") { e.preventDefault(); if (lastSaleNo) { const s = db.sales.find((x) => x.no === lastSaleNo); if (s) print({ kind: "sale", data: s.id }); } else toastErr("No sale saved in this session yet."); }
-      else if (e.key === "F8") { e.preventDefault(); setView("receipts"); }
-      else if (e.key === "F9") { e.preventDefault(); if (lines.length) setShowPay(true); }
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); doSave(false); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); doSave(false); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") { e.preventDefault(); doSave(true); }
-      else if (e.key === "Escape" && typing) (t as HTMLInputElement).blur();
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") { e.preventDefault(); clearCart(); }
+      else if (e.key === "Escape") {
+        const t = e.target as HTMLElement;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) (t as HTMLInputElement).blur();
+      }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [lines, customerId, receiptDiscPct, additional, advance, method, paid, notes, totals, lastSaleNo, db, errMsg]);
+  });
 
   // ---------------- render ----------------
   if (view === "receipts") {
@@ -253,19 +312,42 @@ export function Pos() {
       </div>
     ) },
     { key: "qty", label: "Qty", align: "center" as const, render: (l: CartLine) => (
-      <input type="number" min={0} step="any" value={l.qty} onChange={(e) => setQty(l.productId, num(e.target.value))}
-        className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm dark:border-slate-700 dark:bg-slate-800" />
+      <div className="flex items-center justify-center gap-1">
+        <IconBtn icon={<Minus className="size-3.5" />} label="Decrease quantity" onClick={() => bumpQty(l.productId, -1)} />
+        <input type="number" min={0} step="any" value={l.qty}
+          onChange={(e) => setQty(l.productId, num(e.target.value))}
+          onFocus={(e) => e.target.select()}
+          className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm dark:border-slate-700 dark:bg-slate-800" />
+        <IconBtn icon={<Plus className="size-3.5" />} label="Increase quantity" onClick={() => bumpQty(l.productId, 1)} />
+      </div>
     ) },
     { key: "rate", label: "Rate", align: "right" as const, render: (l: CartLine) => (
-      <input type="number" step="any" value={l.rate} onChange={(e) => updateLine(l.batchId, l.productId, { rate: num(e.target.value) })}
-        className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+      canRate ? (
+        <input type="number" step="any" value={l.rate} onChange={(e) => updateLine(l.batchId, l.productId, { rate: num(e.target.value) })}
+          onFocus={(e) => e.target.select()}
+          className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+      ) : (
+        <span className="tabular-nums">{fmtMoney(l.rate, sym)}</span>
+      )
     ) },
-    { key: "disc", label: "Disc %", align: "right" as const, render: (l: CartLine) => (
-      <input type="number" step="any" min={0} max={100} value={l.discountPct} onChange={(e) => updateLine(l.batchId, l.productId, { discountPct: num(e.target.value) })}
-        className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+    { key: "disc", label: "Disc", align: "right" as const, render: (l: CartLine) => (
+      canDisc ? (
+        <div className="flex items-center justify-end gap-1">
+          <Sel value={l.discType} onChange={(e) => updateLine(l.batchId, l.productId, { discType: e.target.value as DiscType })}
+            className="w-14 rounded-lg border border-slate-200 px-1 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
+            <option value="pct">%</option>
+            <option value="amt">{sym}</option>
+          </Sel>
+          <input type="number" step="any" min={0} value={l.discValue} onChange={(e) => updateLine(l.batchId, l.productId, { discValue: num(e.target.value) })}
+            onFocus={(e) => e.target.select()}
+            className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+        </div>
+      ) : (
+        <span className="tabular-nums text-xs text-slate-400">{l.discValue > 0 ? `${l.discValue}${l.discType === "pct" ? "%" : sym}` : "—"}</span>
+      )
     ) },
     { key: "total", label: "Total", align: "right" as const, render: (l: CartLine) => {
-      const lt = lineTotal(l.rate, l.qty, l.discountPct, l.taxPct);
+      const lt = lineTotal(l.rate, l.qty, l.discType, l.discValue, l.taxPct);
       return <div className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{fmtMoney(lt.total, sym)}</div>;
     } },
     { key: "act", label: "", align: "right" as const, render: (l: CartLine) => (
@@ -283,7 +365,7 @@ export function Pos() {
       actions={
         <Seg<PosView>
           value={view} onChange={setView}
-          options={[{ value: "sale", label: "New Sale" }, { value: "receipts", label: "Receipts & Reprint" }]}
+          options={[{ value: "sale", label: "New Sale (F3)" }, { value: "receipts", label: "Receipts & Reprint (F8)" }]}
         />
       }
       wide
@@ -308,11 +390,14 @@ export function Pos() {
                 <ScanBarcode className="absolute left-3 top-1/2 size-5 -translate-y-1/2 text-indigo-500" />
                 <input
                   ref={scanRef}
-                  placeholder="Scan barcode or type product code / name…  (scanner works like a keyboard)"
+                  placeholder="Scan barcode or search product… (scanner works like a keyboard; ENTER adds to cart)"
                   className="w-full rounded-xl border-2 border-indigo-200 bg-indigo-50/40 py-3 pl-11 pr-4 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white dark:border-indigo-900 dark:bg-slate-800 dark:text-slate-100"
                   onKeyDown={(e) => { if (e.key === "Enter") { handleScan((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).value = ""; } }}
                 />
               </div>
+              <p className="mt-2 text-[11px] text-slate-400">
+                F1 POS · F2 Search · F3 New Sale · F4 Customer · F9 Print · F10 Payment · Ctrl+S save · Ctrl+P save &amp; print
+              </p>
             </div>
           </Card>
 
@@ -324,7 +409,7 @@ export function Pos() {
                 rows={lines}
                 rowKey={(l) => l.batchId + l.productId}
                 pageSize={100}
-                empty="Cart is empty. Scan a barcode or search for a product to begin."
+                empty="Cart is empty. Scan a barcode, press F2, or search for a product to begin."
               />
             </Card>
           </div>
@@ -342,7 +427,7 @@ export function Pos() {
                   ))}
                 </Sel>
               </div>
-              <Btn variant="outline" icon={<UserRound className="size-4" />} onClick={() => navTo("customers")}>+</Btn>
+              <Btn variant="outline" icon={<UserRound className="size-4" />} onClick={() => window.dispatchEvent(new CustomEvent("pos-search", { detail: { mode: "customer" } }))} title="Search customer (F4)">F4</Btn>
             </div>
             {customer && customer.id !== WALKIN_ID && (
               <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800">
@@ -371,20 +456,34 @@ export function Pos() {
               <Row k="Gross Total" v={fmtMoney(totals.gross, sym)} />
               <Row k="Item Discount" v={`− ${fmtMoney(totals.itemDisc, sym)}`} />
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Receipt Discount %</span>
-                <input type="number" min={0} max={100} step="any" value={receiptDiscPct} onChange={(e) => setReceiptDiscPct(num(e.target.value))}
-                  className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+                <span className="text-slate-500">Receipt Discount</span>
+                {canDisc ? (
+                  <div className="flex items-center gap-1">
+                    <Sel value={rdType} onChange={(e) => setRdType(e.target.value as DiscType)}
+                      className="w-14 rounded-lg border border-slate-200 px-1 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
+                      <option value="pct">%</option>
+                      <option value="amt">{sym}</option>
+                    </Sel>
+                    <input type="number" min={0} step="any" value={rdValue} onChange={(e) => setRdValue(num(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400">{rdValue > 0 ? `${rdValue}${rdType === "pct" ? "%" : sym}` : "—"}</span>
+                )}
               </div>
-              <Row k={`Receipt Discount (${fmtNum(receiptDiscPct)}%)`} v={`− ${fmtMoney(totals.receiptDisc, sym)}`} />
+              <Row k={`Receipt Discount`} v={`− ${fmtMoney(totals.receiptDisc, sym)}`} />
               <Row k="Sales Tax" v={fmtMoney(totals.tax, sym)} />
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Additional</span>
                 <input type="number" min={0} step="any" value={additional} onChange={(e) => setAdditional(num(e.target.value))}
+                  onFocus={(e) => e.target.select()}
                   className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Advance</span>
                 <input type="number" min={0} step="any" value={advance} onChange={(e) => setAdvance(num(e.target.value))}
+                  onFocus={(e) => e.target.select()}
                   className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm dark:border-slate-700 dark:bg-slate-800" />
               </div>
               <div className="flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
@@ -395,6 +494,7 @@ export function Pos() {
                 <div className="rounded-xl bg-emerald-50 px-3 py-2 dark:bg-emerald-950/40">
                   <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Paid</div>
                   <input type="number" min={0} step="any" value={paid} onChange={(e) => setPaid(num(e.target.value))}
+                    onFocus={(e) => e.target.select()}
                     className="w-full bg-transparent text-sm font-bold text-emerald-700 outline-none dark:text-emerald-300" />
                 </div>
                 <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800">
@@ -413,25 +513,32 @@ export function Pos() {
 
           <Card title="Actions">
             <div className="grid grid-cols-2 gap-2">
-              <Btn variant="dark" icon={<Plus className="size-4" />} onClick={clearCart}>New Sale (F1)</Btn>
+              <Btn variant="dark" icon={<Plus className="size-4" />} onClick={clearCart}>New Sale (F3)</Btn>
               <Btn variant="outline" icon={<Pause className="size-4" />} onClick={doHold}>Hold (F4)</Btn>
-              <Btn variant="outline" icon={<Undo2 className="size-4" />} onClick={() => setShowHolds(true)}>Retrieve (F5)</Btn>
+              <Btn variant="outline" icon={<Undo2 className="size-4" />} onClick={() => setShowHolds(true)}>Retrieve</Btn>
               <Btn variant="outline" icon={<RotateCcw className="size-4" />} onClick={() => setShowReturn(true)}>Return</Btn>
-              <Btn variant="outline" icon={<Printer className="size-4" />} onClick={() => { if (lastSaleNo) { const s = db.sales.find((x) => x.no === lastSaleNo); if (s) print({ kind: "sale", data: s.id }); } else toastErr("No sale saved in this session yet."); }}>Print (F7)</Btn>
-              <Btn variant="success" icon={<Save className="size-4" />} loading={busy} onClick={() => doSave(false)}>Save Sale</Btn>
+              <Btn variant="outline" icon={<Printer className="size-4" />} onClick={() => {
+                if (lines.length) doSave(true);
+                else if (lastSaleNo) { const s = db.sales.find((x) => x.no === lastSaleNo); if (s) print({ kind: "sale", data: s.id }); }
+                else toastErr("Add products to the cart first.");
+              }}>Print Receipt (F9)</Btn>
+              <Btn variant="outline" icon={<CreditCard className="size-4" />} onClick={() => { if (lines.length) setShowPay(true); }}>Payment (F10)</Btn>
             </div>
+            <Btn variant="success" className="mt-2 w-full" icon={<Save className="size-4" />} loading={busy} onClick={() => doSave(false)}>
+              Save Sale (Ctrl+S)
+            </Btn>
             <Btn variant="primary" className="mt-2 w-full" icon={<Printer className="size-4" />} loading={busy} onClick={() => doSave(true)}>
-              Save &amp; Print Receipt
+              Save &amp; Print Receipt (Ctrl+P)
             </Btn>
             <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-400 dark:bg-slate-800">
-              <span><b className="text-slate-500 dark:text-slate-300">Shortcuts:</b> F1 new · F2 search · F4 hold · F5 retrieve · F7 print · F8 receipts · F9 payment · Ctrl+S save · Ctrl+P save &amp; print</span>
+              <span>F1 POS · F2 search · F3 new · F4 customer · F6 purchases · F7 inventory · F8 receipts · F9 print · F10 payment · F11 fullscreen · F12 settings</span>
             </div>
           </Card>
         </div>
       </div>
 
       {/* product search modal */}
-      <Modal open={showSearch} onClose={() => setShowSearch(false)} title="Search Products" subtitle="Type name, generic, barcode or code — click to add 1 unit, or double-click for qty 1. Use the + stepper after adding."
+      <Modal open={showSearch} onClose={() => setShowSearch(false)} title="Search Products" subtitle="Type name, generic, barcode or code — click to add 1 unit. Use the + / − steppers after adding."
         size="xl">
         <Inp autoFocus placeholder="Search products…" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
         <div className="mt-4 max-h-[50vh] overflow-y-auto">
@@ -502,7 +609,7 @@ export function Pos() {
             </Sel>
           </Field>
           <Field label="Paid Amount">
-            <Num value={paid} onChange={(e) => setPaid(num(e.target.value))} min={0} />
+            <Num value={paid} onChange={(e) => setPaid(num(e.target.value))} min={0} autoFocus />
           </Field>
           <Field label="Additional Amount">
             <Num value={additional} onChange={(e) => setAdditional(num(e.target.value))} min={0} />
@@ -510,9 +617,17 @@ export function Pos() {
           <Field label="Advance">
             <Num value={advance} onChange={(e) => setAdvance(num(e.target.value))} min={0} />
           </Field>
-          <Field label="Receipt Discount %" className="col-span-2">
-            <Num value={receiptDiscPct} onChange={(e) => setReceiptDiscPct(num(e.target.value))} min={0} max={100} />
-          </Field>
+          {canDisc && (
+            <Field label="Receipt Discount" className="col-span-2">
+              <div className="flex gap-2">
+                <Sel value={rdType} onChange={(e) => setRdType(e.target.value as DiscType)} className="w-24">
+                  <option value="pct">Percentage %</option>
+                  <option value="amt">Fixed amount</option>
+                </Sel>
+                <Num value={rdValue} onChange={(e) => setRdValue(num(e.target.value))} min={0} className="flex-1" />
+              </div>
+            </Field>
+          )}
           <Field label="Notes" className="col-span-2">
             <Inp value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional note on the receipt" />
           </Field>
@@ -543,7 +658,7 @@ export function Pos() {
                     setLines(s.items.map((i) => ({
                       productId: i.productId, productName: i.productName, generic: i.generic,
                       batchId: i.batchId, batchNo: i.batchNo, expDate: i.expDate, unit: i.unit,
-                      rate: i.rate, qty: i.qty, discountPct: i.discountPct, taxPct: i.taxPct, cost: i.cost,
+                      rate: i.rate, qty: i.qty, discType: i.discountType, discValue: i.discountValue, taxPct: i.taxPct, cost: i.cost,
                     })));
                     setCustomerId(s.customerId);
                     setNotes(s.notes);
@@ -651,7 +766,7 @@ function ReceiptsView({ onBack, onReturn }: { onBack: () => void; onReturn: () =
     <Page title="Receipts & Reprint" subtitle="Search any saved receipt, reprint it, or process a return."
       actions={<Btn variant="outline" onClick={onBack} icon={<Plus className="size-4" />}>Back to Sale</Btn>} wide>
       <div className="mb-4 flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[220px]">
+        <div className="relative min-w-[220px] flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <Inp className="pl-9" placeholder="Search by receipt no, customer, cashier… (F8)" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
         </div>
@@ -741,7 +856,7 @@ function ReturnModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
     return it ? it.qty - alreadyReturned(sale!, it.productId, it.batchId) : 0;
   };
   const total = sale
-    ? round2(sale.items.reduce((s, it) => s + (qtyMap[it.id] || 0) * it.rate, 0))
+    ? round2(sale.items.reduce((s, it) => s + (qtyMap[it.id] || 0) * (it.rate - (it.discountType === "pct" ? round2(it.rate * it.discountValue / 100) : it.discountValue)), 0))
     : 0;
 
   const submit = () => {
