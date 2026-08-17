@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron": "electron .",
+    "dist:win": "vite build --base=./ && electron-builder --win"
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",

@@ -404,3 +404,172 @@
   background-clip: text;
   color: transparent;
 }
+
+/* ===========================================================================
+   MY PHARMACY POS — print & barcode label styles
+   ========================================================================= */
+
+#print-root {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-root,
+  #print-root * {
+    visibility: visible;
+  }
+  #print-root {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .pp-break {
+    page-break-after: always;
+  }
+  @page {
+    margin: 6mm;
+  }
+}
+
+.pp-page {
+  margin: 0 auto;
+  background: #fff;
+  color: #0f172a;
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  padding: 6px 10px;
+}
+.pp-58mm {
+  width: 58mm;
+  font-size: 9px;
+}
+.pp-80mm {
+  width: 80mm;
+  font-size: 11px;
+}
+.pp-A4 {
+  width: 210mm;
+  font-size: 12px;
+}
+.pp-A5 {
+  width: 148mm;
+  font-size: 11px;
+}
+.pp-58mm .pp-title {
+  font-size: 11px;
+}
+.pp-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.pp-head {
+  text-align: center;
+  margin-bottom: 6px;
+}
+.pp-store {
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pp-rule {
+  border-top: 1px dashed #94a3b8;
+  margin: 5px 0;
+}
+.pp-title {
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin: 3px 0 1px;
+}
+.pp-muted {
+  color: #64748b;
+  font-size: 0.9em;
+}
+.pp-meta {
+  margin: 4px 0;
+}
+.pp-meta td {
+  padding: 1px 0;
+}
+.pp-r {
+  text-align: right;
+}
+.pp-items {
+  margin: 5px 0;
+}
+.pp-items th {
+  text-align: left;
+  padding: 3px 2px;
+  border-bottom: 1px solid #cbd5e1;
+  font-size: 0.92em;
+}
+.pp-items td {
+  padding: 3px 2px;
+  border-bottom: 1px dotted #e2e8f0;
+  vertical-align: top;
+}
+.pp-totals td {
+  padding: 2px 0;
+}
+.pp-net td {
+  border-top: 1px solid #94a3b8;
+  font-weight: 800;
+  padding-top: 4px;
+}
+.pp-foot {
+  text-align: center;
+  margin-top: 8px;
+  font-size: 0.9em;
+}
+.pp-thanks {
+  font-weight: 600;
+  margin-top: 2px;
+}
+.pp-total-first {
+  text-align: left !important;
+}
+
+/* barcode shelf labels */
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pp-80mm .label-grid,
+.pp-58mm .label-grid {
+  grid-template-columns: 1fr;
+}
+.label {
+  border: 1px dashed #94a3b8;
+  border-radius: 6px;
+  padding: 6px;
+  text-align: center;
+  break-inside: avoid;
+}
+.label-name {
+  font-weight: 600;
+  font-size: 0.85em;
+}
+.label-price {
+  font-weight: 800;
+  font-size: 1em;
+  margin: 2px 0;
+}
+.label-extra {
+  font-size: 0.8em;
+  color: #64748b;
+}
+.label img {
+  height: 34px;
+  margin: 3px auto 0;
+  display: block;
+}
+.label-bc-text {
+  font-family: monospace;
+  font-size: 0.75em;
+  letter-spacing: 1px;
+  margin-top: 1px;
+}

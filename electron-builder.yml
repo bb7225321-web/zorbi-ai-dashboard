@@ -1,0 +1,23 @@
+# MY PHARMACY POS — packaging configuration (electron-builder)
+appId: com.mypharmacy.pos
+productName: My Pharmacy POS
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - electron/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: My Pharmacy POS
+  artifactName: My-Pharmacy-POS-Setup-${version}.${ext}
+portable:
+  artifactName: My-Pharmacy-POS-Portable-${version}.${ext}
