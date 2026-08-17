@@ -1,1 +1,0 @@
-import{r as a}from"./react-vendor-CpSNijkM.js";function n(t,o){const[e,c]=a.useState(()=>{try{const r=window.localStorage.getItem(t);if(r!==null)return JSON.parse(r)}catch{}return o});return a.useEffect(()=>{try{window.localStorage.setItem(t,JSON.stringify(e))}catch{}},[t,e]),[e,c]}export{n as u};
